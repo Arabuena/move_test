@@ -6,7 +6,8 @@ const config: CapacitorConfig = {
   webDir: 'build',
   server: {
     androidScheme: 'https',
-    cleartext: true
+    cleartext: true,
+    allowNavigation: ['move-test.onrender.com']
   },
   android: {
     buildOptions: {

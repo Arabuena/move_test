@@ -3,6 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "dependencies": {
+    "@capacitor/android": "4.8.0",
+    "@capacitor/cli": "4.8.0",
+    "@capacitor/core": "4.8.0",
+    "@capacitor/preferences": "4.0.0",
+    "@capacitor/splash-screen": "4.0.0",
     "@headlessui/react": "^1.7.18",
     "@heroicons/react": "^2.1.1",
     "@react-google-maps/api": "^2.20.6",
@@ -21,7 +26,9 @@
     "start": "react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
-    "eject": "react-scripts eject"
+    "eject": "react-scripts eject",
+    "build:android": "npm run build && npx cap add android && npx cap sync android",
+    "open:android": "npx cap open android"
   },
   "eslintConfig": {
     "extends": [

@@ -1,0 +1,13 @@
+{
+  "android": {
+    "icon": {
+      "background": "#FFFFFF",
+      "foreground": "#000000"
+    },
+    "splash": {
+      "background": "#FFFFFF",
+      "image": "resources/splash.png",
+      "launchShowDuration": 3000
+    }
+  }
+} 

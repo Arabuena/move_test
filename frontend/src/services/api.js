@@ -1,9 +1,8 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: process.env.NODE_ENV === 'production' 
-    ? '/api'  // Em produção, usa o caminho relativo
-    : 'http://localhost:5000/api' // Em desenvolvimento, usa localhost
+  baseURL: process.env.REACT_APP_API_URL || 'https://move-test.onrender.com',
+  timeout: 5000,
 });
 
 // Adiciona logs para debug
@@ -25,6 +24,10 @@ api.interceptors.response.use(
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       window.location.href = '/login';
+    }
+    if (!navigator.onLine) {
+      // Tratar modo offline
+      return Promise.reject(new Error('Você está offline. Por favor, verifique sua conexão.'));
     }
     return Promise.reject(error);
   }

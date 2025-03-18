@@ -13,6 +13,7 @@
     "node": ">=16.0.0"
   },
   "dependencies": {
+    "@react-google-maps/api": "^2.20.6",
     "concurrently": "^8.2.2"
   }
-} 
+}

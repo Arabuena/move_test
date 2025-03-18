@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { GoogleMap, LoadScript, DirectionsRenderer } from '@react-google-maps/api';
+import { GoogleMap, DirectionsRenderer } from '@react-google-maps/api';
 import AddressAutocomplete from '../components/AddressAutocomplete';
 import api from '../services/api';
 import RideStatus from '../components/RideStatus';
@@ -12,6 +12,11 @@ const GOOGLE_MAPS_LIBRARIES = ['places'];
 const mapContainerStyle = {
   width: '100%',
   height: '400px'
+};
+
+const defaultCenter = {
+  lat: -23.550520, // São Paulo
+  lng: -46.633308
 };
 
 export default function RequestRide() {
@@ -28,6 +33,13 @@ export default function RequestRide() {
   const [showChat, setShowChat] = useState(false);
   const navigate = useNavigate();
   const mapRef = useRef(null);
+
+  // Adicione isso no início do componente para debug
+  useEffect(() => {
+    console.log('RequestRide montado');
+    console.log('Google Maps API Key:', GOOGLE_MAPS_API_KEY);
+    console.log('Bibliotecas carregadas:', GOOGLE_MAPS_LIBRARIES);
+  }, []);
 
   // Defina renderMarker usando useCallback antes de usá-lo
   const renderMarker = useCallback((position) => {
@@ -84,7 +96,10 @@ export default function RequestRide() {
   useEffect(() => {
     const fetchCurrentRide = async () => {
       try {
+        console.log('Buscando corrida atual...');
         const response = await api.get('/rides/current');
+        console.log('Resposta da corrida atual:', response.data);
+        
         if (response.data) {
           setCurrentRide(response.data);
           
@@ -112,7 +127,7 @@ export default function RequestRide() {
           }
         }
       } catch (error) {
-        console.error('Erro ao buscar corrida atual:', error);
+        console.error('Erro ao buscar corrida:', error);
         setError('Erro ao buscar corrida atual');
       }
     };
@@ -213,17 +228,21 @@ export default function RequestRide() {
 
   return (
     <div className="h-full relative">
-      <LoadScript googleMapsApiKey={GOOGLE_MAPS_API_KEY} libraries={GOOGLE_MAPS_LIBRARIES}>
-        <div className="h-full flex">
-          {/* Mapa */}
-          <div className={`flex-1 relative ${showChat ? 'hidden md:block' : ''}`}>
+      <div className="container mx-auto px-4 py-8">
+        <div className="bg-white rounded-lg shadow-lg overflow-hidden">
+          {error && (
+            <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative">
+              {error}
+            </div>
+          )}
+          
+          <div className="h-[400px] relative">
             <GoogleMap
               mapContainerStyle={mapContainerStyle}
-              center={currentLocation || { lat: -16.6799, lng: -49.2556 }}
+              center={currentLocation || defaultCenter}
               zoom={13}
               onLoad={onMapLoad}
             >
-              {/* Renderiza as direções se existirem */}
               {directions && <DirectionsRenderer directions={directions} />}
             </GoogleMap>
           </div>
@@ -338,7 +357,7 @@ export default function RequestRide() {
             )}
           </div>
         </div>
-      </LoadScript>
+      </div>
     </div>
   );
 } 

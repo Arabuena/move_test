@@ -18,19 +18,30 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const user = await login(formData.email, formData.password);
-      console.log('Login successful:', user);
-      
-      if (user.role === 'admin') {
-        navigate('/admin');
-      } else if (user.role === 'driver') {
-        navigate('/driver-dashboard');
-      } else {
-        navigate('/request-ride');
+      const result = await login(formData.email, formData.password);
+      if (result.success) {
+        console.log('Redirecionando usuário:', result.userType); // Debug
+        
+        // Redireciona baseado no tipo de usuário
+        switch (result.userType?.toLowerCase()) {
+          case 'driver':
+            navigate('/driver-dashboard'); // OK - mantém essa rota
+            break;
+          case 'user':
+          case 'passenger':
+            navigate('/request-ride'); // OK - mantém essa rota
+            break;
+          case 'admin':
+            navigate('/admin'); // Corrigido de /admin-dashboard para /admin
+            break;
+          default:
+            navigate('/home');
+            break;
+        }
       }
-    } catch (err) {
-      console.error('Login error:', err);
-      setError(err.toString());
+    } catch (error) {
+      console.error('Login error:', error.message);
+      setError(error.message);
     } finally {
       setLoading(false);
     }

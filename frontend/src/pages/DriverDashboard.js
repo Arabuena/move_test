@@ -1,15 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import api from '../services/api';
-import { LoadScript, GoogleMap, DirectionsRenderer, Marker } from '@react-google-maps/api';
+import { GoogleMap, DirectionsRenderer, Marker } from '@react-google-maps/api';
+import RideStatus from '../components/RideStatus';
+import RideChat from '../components/RideChat';
 
-// Constantes que podem ficar fora do componente
-const GOOGLE_MAPS_API_KEY = process.env.REACT_APP_GOOGLE_MAPS_API_KEY;
-const GOOGLE_MAPS_LIBRARIES = ['places'];
-const CONNECTION_CHECK_INTERVAL = 10000;
-const MAX_RETRIES = 3;
 const mapContainerStyle = {
   width: '100%',
-  height: '100%'
+  height: '400px'
 };
 
 // Função de utilidade que pode ficar fora
@@ -25,27 +22,27 @@ const debounce = (func, wait) => {
   };
 };
 
+const defaultCenter = {
+  lat: -23.550520, // São Paulo
+  lng: -46.633308
+};
+
 export default function DriverDashboard() {
   // Estados
-  const [isOnline, setIsOnline] = useState(false);
   const [currentRide, setCurrentRide] = useState(null);
-  const [availableRide, setAvailableRide] = useState(null);
+  const [availableRides, setAvailableRides] = useState([]);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
   const [currentLocation, setCurrentLocation] = useState(null);
   const [directions, setDirections] = useState(null);
+  const [isOnline, setIsOnline] = useState(false);
   const [directionsRenderer, setDirectionsRenderer] = useState(null);
-  const [rideStatus, setRideStatus] = useState(null);
-  const [isConnected, setIsConnected] = useState(true);
-  const [declinedRideId, setDeclinedRideId] = useState(null);
-  const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
+  const [showChat, setShowChat] = useState(false);
 
   // Refs
   const mapRef = useRef(null);
   const pollingIntervalRef = useRef(null);
-  const showTimerRef = useRef(null);
-  const hideTimerRef = useRef(null);
   const audioRef = useRef(null);
-  const DECLINE_TIMEOUT = 45000;
 
   // 1. Primeiro definir playNotification
   const playNotification = useCallback(() => {
@@ -67,16 +64,13 @@ export default function DriverDashboard() {
     try {
       const response = await api.get('/rides/available');
       if (response.data.length > 0) {
-        const ride = response.data[0];
-        if (ride._id !== declinedRideId) {
-          setAvailableRide(ride);
-          playNotification();
-        }
+        setAvailableRides(response.data);
+        playNotification();
       }
     } catch (error) {
       console.error('Erro ao buscar corridas:', error);
     }
-  }, [isOnline, currentRide, declinedRideId, playNotification]);
+  }, [isOnline, currentRide, playNotification]);
 
   // 3. Depois definir debouncedFetch que usa fetchAvailableRide
   const debouncedFetch = useCallback(
@@ -141,12 +135,10 @@ export default function DriverDashboard() {
     if (!mapRef.current || !window.google) return;
 
     try {
-      // Limpa rota anterior se existir
       if (directionsRenderer) {
         directionsRenderer.setMap(null);
       }
 
-      // Cria novo DirectionsService e DirectionsRenderer
       const directionsService = new window.google.maps.DirectionsService();
       const newDirectionsRenderer = new window.google.maps.DirectionsRenderer({
         map: mapRef.current,
@@ -154,15 +146,12 @@ export default function DriverDashboard() {
         preserveViewport: false
       });
 
-      // Solicita a rota
       const result = await directionsService.route(routeData);
       
-      // Atualiza a rota no mapa
       newDirectionsRenderer.setDirections(result);
       setDirectionsRenderer(newDirectionsRenderer);
       setDirections(result);
 
-      // Ajusta o zoom para mostrar toda a rota
       const bounds = new window.google.maps.LatLngBounds();
       bounds.extend(routeData.origin);
       bounds.extend(routeData.destination);
@@ -261,7 +250,7 @@ export default function DriverDashboard() {
       console.log('Parando polling');
       clearInterval(pollingIntervalRef.current);
       pollingIntervalRef.current = null;
-      setAvailableRide(null); // Limpa qualquer corrida disponível ao parar
+      setAvailableRides([]); // Limpa qualquer corrida disponível ao parar
     }
   }, []);
 
@@ -283,19 +272,16 @@ export default function DriverDashboard() {
 
         const response = await api.get('/rides/available');
         if (response.data.length > 0) {
-          const ride = response.data[0];
-          if (ride._id !== declinedRideId) {
-            setAvailableRide(ride);
-            playNotification();
-          }
+          setAvailableRides(response.data);
+          playNotification();
         } else {
-          setAvailableRide(null);
+          setAvailableRides([]);
         }
       } catch (error) {
         console.error('Erro no polling:', error);
       }
     }, 5000);
-  }, [isOnline, currentRide, declinedRideId, playNotification, stopPolling]);
+  }, [isOnline, currentRide, playNotification, stopPolling]);
 
   // 3. Depois o useEffect que usa ambas as funções
   useEffect(() => {
@@ -305,7 +291,6 @@ export default function DriverDashboard() {
         if (response.data) {
           const currentRide = response.data;
           setCurrentRide(currentRide);
-          setRideStatus(currentRide.status);
           stopPolling(); // Para o polling se tiver corrida atual
 
           const rideData = processRideData(currentRide);
@@ -392,90 +377,19 @@ export default function DriverDashboard() {
     }
   }, [isOnline, currentRide, startPolling, stopPolling]);
 
-  // Handler para alternar status online/offline
-  const handleStatusToggle = async () => {
-    try {
-      const newStatus = !isOnline;
-      console.log('Alterando status para:', newStatus);
-      
-      await api.patch('/users/availability', { isAvailable: newStatus });
-      setIsOnline(newStatus);
-    } catch (error) {
-      console.error('Erro ao alterar status:', error);
-    }
-  };
-
-  // Modifique o useEffect de verificação de conexão
-  useEffect(() => {
-    let retryCount = 0;
-    
-    const checkConnection = async () => {
-      try {
-        console.log('Verificando conexão...');
-        const response = await api.get('/users/me');
-        console.log('Resposta recebida:', response.data);
-        
-        setIsConnected(true);
-        setError('');
-        retryCount = 0;
-      } catch (error) {
-        console.error('Erro completo:', error);
-        
-        // Erro de autenticação
-        if (error.response?.status === 401) {
-          setError('Sessão expirada. Por favor, faça login novamente.');
-          // Aqui você pode redirecionar para a página de login
-          return;
-        }
-        
-        // Erro de conexão
-        if (error.code === 'ERR_NETWORK') {
-          setError('Não foi possível conectar ao servidor. Verificando conexão...');
-        } else {
-          setError(`Erro ao verificar conexão: ${error.response?.data?.message || error.message}`);
-        }
-        
-        retryCount++;
-        setIsConnected(false);
-        
-        if (retryCount >= MAX_RETRIES) {
-          setIsOnline(false);
-        }
-      }
-    };
-
-    // Verifica imediatamente
-    checkConnection();
-    
-    // Configura o intervalo
-    const interval = setInterval(checkConnection, CONNECTION_CHECK_INTERVAL);
-
-    // Cleanup
-    return () => {
-      clearInterval(interval);
-    };
-  }, []);
-
   // Atualizar a função handleAcceptRide
-  const handleAcceptRide = async () => {
+  const handleAcceptRide = async (rideId) => {
     try {
-      const response = await api.post(`/rides/accept/${availableRide._id}`);
-      
-      // Processa os dados da corrida antes de atualizar a rota
-      const rideData = processRideData(availableRide);
-      if (!rideData) return;
-
-      // Atualiza a rota com os dados processados (false = rota até o passageiro)
-      await updateMapRoute(rideData);
-      
+      setLoading(true);
+      const response = await api.post(`/rides/accept/${rideId}`);
       setCurrentRide(response.data);
-      setRideStatus('accepted');
-      setAvailableRide(null);
+      setAvailableRides([]);
       stopPolling();
-
     } catch (error) {
       console.error('Erro ao aceitar corrida:', error);
       setError('Erro ao aceitar corrida');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -483,16 +397,7 @@ export default function DriverDashboard() {
   const handleStartRide = async () => {
     try {
       const response = await api.post(`/rides/start/${currentRide._id}`);
-      
-      // Processa os dados novamente para a rota até o destino
-      const rideData = processRideData(currentRide);
-      if (!rideData) return;
-
-      // Atualiza a rota para o destino (true = rota até o destino)
-      await updateMapRoute(rideData);
-      
       setCurrentRide(response.data);
-      setRideStatus('in_progress');
     } catch (error) {
       console.error('Erro ao iniciar corrida:', error);
       setError('Erro ao iniciar corrida');
@@ -505,28 +410,20 @@ export default function DriverDashboard() {
 
     try {
       await api.post(`/rides/complete/${currentRide._id}`);
-      
-      // Limpa todos os estados relacionados à corrida
       setCurrentRide(null);
-      setRideStatus(null);
       setDirections(null);
-      setAvailableRide(null);
+      setAvailableRides([]);
       
-      // Limpa o renderer do mapa
       if (directionsRenderer) {
         directionsRenderer.setMap(null);
         setDirectionsRenderer(null);
       }
 
-      // Adiciona mensagem de sucesso
       setError('Corrida finalizada com sucesso!');
-      
-      // Limpa a mensagem após 3 segundos
       setTimeout(() => {
         setError('');
       }, 3000);
 
-      // Aguarda um momento antes de reiniciar o polling
       setTimeout(() => {
         if (isOnline) {
           startPolling();
@@ -538,145 +435,6 @@ export default function DriverDashboard() {
       setError(error?.response?.data?.message || 'Erro ao finalizar corrida');
     }
   }, [currentRide, directionsRenderer, isOnline, startPolling]);
-
-  // Função para recusar corrida
-  const handleDeclineRide = () => {
-    if (!availableRide) return;
-    
-    // Limpa os timers atuais
-    if (showTimerRef.current) clearTimeout(showTimerRef.current);
-    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-    
-    setDeclinedRideId(availableRide._id);
-    setAvailableRide(null);
-
-    setTimeout(() => {
-      setDeclinedRideId(null);
-    }, DECLINE_TIMEOUT);
-  };
-
-  // Atualizar o componente CurrentRideDetailsComponent
-  const CurrentRideDetailsComponent = ({ ride, status, onComplete, onStart }) => {
-    const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
-
-    const openGpsNavigation = () => {
-      // Coordenadas do destino baseadas no status da corrida
-      const destination = status === 'accepted' 
-        ? ride.origin.coordinates  // Se acabou de aceitar, navega até o passageiro
-        : ride.destination.coordinates; // Se já pegou o passageiro, navega até o destino final
-      
-      // Inverte as coordenadas pois o MongoDB armazena como [lng, lat] e as APIs de navegação usam [lat, lng]
-      const [lng, lat] = destination;
-      
-      // Cria URLs para diferentes apps de navegação
-      const navigationApps = {
-        'Google Maps': `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`,
-        'Waze': `https://www.waze.com/ul?ll=${lat},${lng}&navigate=yes`,
-        // Outros apps podem ser adicionados aqui
-      };
-
-      // Cria o menu de seleção
-      const app = window.confirm(
-        'Escolha o app de navegação:\n\n' +
-        'OK - Google Maps\n' +
-        'Cancelar - Waze'
-      );
-
-      // Abre o app escolhido
-      const url = app ? navigationApps['Google Maps'] : navigationApps['Waze'];
-      window.open(url, '_blank');
-    };
-
-    return (
-      <div className="fixed bottom-0 left-0 right-0 z-50">
-        {/* Painel de detalhes expansível - Movido para antes do botão principal */}
-        <div className={`bg-white shadow-lg transition-transform duration-300 ease-in-out transform ${
-          isDetailsExpanded ? 'translate-y-0' : 'translate-y-full'
-        }`}>
-          {isDetailsExpanded && (
-            <div className="p-6">
-              <div className="max-w-xl mx-auto">
-                <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-lg font-semibold text-gray-900">
-                    {status === 'accepted' ? 'Indo buscar passageiro' : 'Em viagem'}
-                  </h3>
-                  <div className="px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
-                    {status === 'accepted' ? 'A caminho' : 'Em andamento'}
-                  </div>
-                </div>
-
-                <div className="space-y-4">
-                  <div className="bg-gray-50 p-4 rounded-lg">
-                    <div className="mb-3">
-                      <p className="text-sm text-gray-500">Passageiro</p>
-                      <p className="text-gray-900 font-medium">{ride.passenger.name}</p>
-                    </div>
-
-                    <div>
-                      <p className="text-sm text-gray-500">
-                        {status === 'accepted' ? 'Local de embarque' : 'Destino'}
-                      </p>
-                      <p className="text-gray-900">
-                        {status === 'accepted' ? ride.origin.address : ride.destination.address}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-4">
-                    <div className="bg-gray-50 p-3 rounded-lg">
-                      <p className="text-sm text-gray-500">Distância</p>
-                      <p className="text-gray-900 font-medium">
-                        {(ride.distance / 1000).toFixed(1)} km
-                      </p>
-                    </div>
-                    <div className="bg-gray-50 p-3 rounded-lg">
-                      <p className="text-sm text-gray-500">Tempo est.</p>
-                      <p className="text-gray-900 font-medium">
-                        {Math.round(ride.duration / 60)} min
-                      </p>
-                    </div>
-                    <div className="bg-gray-50 p-3 rounded-lg">
-                      <p className="text-sm text-gray-500">Valor</p>
-                      <p className="text-green-600 font-semibold">
-                        R$ {ride.price.toFixed(2)}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Botão para expandir/colapsar */}
-        <button
-          onClick={() => setIsDetailsExpanded(!isDetailsExpanded)}
-          className="absolute -top-8 right-4 bg-white rounded-t-lg px-4 py-1 text-sm text-gray-600 shadow-lg"
-        >
-          {isDetailsExpanded ? '▼ Minimizar' : '▲ Detalhes'}
-        </button>
-
-        {/* Botões principais */}
-        <div className="bg-white shadow-lg p-4 flex justify-center space-x-4">
-          {/* Botão de navegação GPS */}
-          <button
-            onClick={openGpsNavigation}
-            className="flex-1 bg-blue-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-blue-700 transition-colors"
-          >
-            Abrir GPS
-          </button>
-
-          {/* Botão de iniciar/finalizar */}
-          <button
-            onClick={status === 'accepted' ? onStart : onComplete}
-            className="flex-1 bg-green-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-green-700 transition-colors"
-          >
-            {status === 'accepted' ? 'Iniciar Corrida' : 'Finalizar Corrida'}
-          </button>
-        </div>
-      </div>
-    );
-  };
 
   // Usar as funções em algum lugar do código
   useEffect(() => {
@@ -691,141 +449,150 @@ export default function DriverDashboard() {
     };
   }, [clearMapRoute]);
 
-  return (
-    <div className="h-screen flex flex-col">
-      <LoadScript 
-        googleMapsApiKey={GOOGLE_MAPS_API_KEY}
-        libraries={GOOGLE_MAPS_LIBRARIES}
-      >
-        <div className="flex-1 relative">
-          <GoogleMap
-            mapContainerStyle={mapContainerStyle}
-            zoom={14}
-            center={currentLocation || { lat: -23.550520, lng: -46.633308 }}
-            onLoad={onMapLoad}
-            options={{
-              zoomControl: true,
-              streetViewControl: false,
-              mapTypeControl: false,
-              fullscreenControl: false
-            }}
-          >
-            {currentLocation && (
-              <Marker
-                position={currentLocation}
-                icon={{
-                  url: 'https://maps.google.com/mapfiles/ms/icons/blue-dot.png',
-                  scaledSize: new window.google.maps.Size(32, 32)
-                }}
-              />
-            )}
-            {directions && <DirectionsRenderer directions={directions} />}
-          </GoogleMap>
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center h-screen">
+        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-gray-900"></div>
+      </div>
+    );
+  }
 
-          {/* Botão de status */}
-          <div className="absolute top-4 right-4 z-10">
+  return (
+    <div className="h-full relative">
+      {loading && (
+        <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="animate-spin rounded-full h-32 w-32 border-t-2 border-b-2 border-white"></div>
+        </div>
+      )}
+      <div className="container mx-auto px-4 py-8">
+        <div className="bg-white rounded-lg shadow-lg overflow-hidden">
+          {/* Botão de Status Online/Offline */}
+          <div className="p-4 flex justify-end">
             <button
-              onClick={handleStatusToggle}
-              disabled={!isConnected}
-              className={`px-4 py-2 rounded-lg font-medium ${
-                !isConnected 
-                  ? 'bg-gray-400 text-white cursor-not-allowed' 
-                  : isOnline 
-                    ? 'bg-green-500 text-white hover:bg-green-600' 
-                    : 'bg-gray-200 text-gray-800 hover:bg-gray-300'
-              } transition-colors`}
+              onClick={async () => {
+                try {
+                  const newStatus = !isOnline;
+                  await api.patch('/users/availability', { isAvailable: newStatus });
+                  setIsOnline(newStatus);
+                } catch (error) {
+                  console.error('Erro ao alterar status:', error);
+                  setError('Erro ao alterar status');
+                }
+              }}
+              className={`px-4 py-2 rounded-full font-medium ${
+                isOnline 
+                  ? 'bg-green-500 text-white hover:bg-green-600' 
+                  : 'bg-red-500 text-white hover:bg-red-600'
+              }`}
             >
-              {!isConnected 
-                ? 'Servidor Indisponível' 
-                : isOnline 
-                  ? 'Online' 
-                  : 'Offline'}
+              {isOnline ? 'Online' : 'Offline'}
             </button>
           </div>
 
-          {/* Indicador de status do servidor */}
-          <div className="absolute top-4 left-4 z-10 flex items-center space-x-2">
-            <div 
-              className={`w-3 h-3 rounded-full ${
-                isConnected ? 'bg-green-500' : 'bg-red-500 animate-pulse'
-              }`}
-            />
-            <span className="text-sm text-gray-700">
-              {isConnected ? 'Conectado' : 'Desconectado'}
-            </span>
+          {error && (
+            <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative">
+              {error}
+            </div>
+          )}
+
+          <div className="h-[400px] relative">
+            <GoogleMap
+              mapContainerStyle={mapContainerStyle}
+              center={currentLocation || defaultCenter}
+              zoom={13}
+              onLoad={onMapLoad}
+              options={{
+                zoomControl: true,
+                streetViewControl: false,
+                mapTypeControl: false,
+                fullscreenControl: false
+              }}
+            >
+              {currentLocation && (
+                <Marker
+                  position={currentLocation}
+                  icon={{
+                    url: 'https://maps.google.com/mapfiles/ms/icons/blue-dot.png',
+                    scaledSize: new window.google.maps.Size(32, 32)
+                  }}
+                />
+              )}
+              {directions && <DirectionsRenderer directions={directions} />}
+            </GoogleMap>
           </div>
 
-          {/* Corrida disponível */}
-          {availableRide && !currentRide && (
-            <div className="fixed bottom-0 left-0 right-0 bg-white shadow-lg rounded-t-3xl p-6 animate-slide-up z-30">
-              <div className="max-w-xl mx-auto">
-                <h3 className="text-lg font-semibold mb-4">Nova solicitação de corrida!</h3>
-                <div className="space-y-4">
-                  <div className="bg-gray-50 p-3 rounded-lg">
-                    <p className="text-sm text-gray-600">
-                      <span className="font-medium">Origem:</span> {availableRide.origin.address}
-                    </p>
-                    <p className="text-sm text-gray-600 mt-2">
-                      <span className="font-medium">Destino:</span> {availableRide.destination.address}
-                    </p>
-                  </div>
+          <div className="p-4">
+            {currentRide ? (
+              <div className="space-y-4">
+                <RideStatus ride={currentRide} />
+                
+                <div className="flex space-x-4">
+                  {currentRide.status === 'accepted' && (
+                    <button
+                      onClick={handleStartRide}
+                      className="flex-1 bg-green-600 text-white py-2 px-4 rounded hover:bg-green-700"
+                    >
+                      Iniciar Corrida
+                    </button>
+                  )}
+                  
+                  {currentRide.status === 'in_progress' && (
+                    <button
+                      onClick={handleCompleteRide}
+                      className="flex-1 bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700"
+                    >
+                      Finalizar Corrida
+                    </button>
+                  )}
 
-                  <div className="grid grid-cols-3 gap-4">
-                    <div className="bg-gray-50 p-3 rounded-lg">
-                      <p className="text-sm font-medium text-gray-500">Distância</p>
-                      <p className="text-sm text-gray-900">{(availableRide.distance / 1000).toFixed(1)} km</p>
-                    </div>
-                    <div className="bg-gray-50 p-3 rounded-lg">
-                      <p className="text-sm font-medium text-gray-500">Tempo est.</p>
-                      <p className="text-sm text-gray-900">{Math.round(availableRide.duration / 60)} min</p>
-                    </div>
-                    <div className="bg-gray-50 p-3 rounded-lg">
-                      <p className="text-sm font-medium text-gray-500">Valor</p>
-                      <p className="text-lg font-semibold text-green-600">
-                        R$ {availableRide.price.toFixed(2)}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex space-x-3 mt-6">
                   <button
-                    onClick={handleAcceptRide}
-                    className="flex-1 bg-green-500 text-white py-4 px-4 rounded-lg font-medium hover:bg-green-600 transition-colors"
+                    onClick={() => setShowChat(!showChat)}
+                    className="flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700"
                   >
-                    Aceitar Corrida
-                  </button>
-                  <button
-                    onClick={handleDeclineRide}
-                    className="flex-1 bg-gray-200 text-gray-800 py-4 px-4 rounded-lg font-medium hover:bg-gray-300 transition-colors"
-                  >
-                    Recusar
+                    <svg className="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                    </svg>
+                    Chat
                   </button>
                 </div>
-              </div>
-            </div>
-          )}
 
-          {/* Detalhes da corrida atual */}
-          {currentRide && (
-            <CurrentRideDetailsComponent 
-              ride={currentRide}
-              status={rideStatus}
-              onComplete={handleCompleteRide}
-              onStart={handleStartRide}
-            />
-          )}
-
-          {/* Mensagem de erro */}
-          {error && (
-            <div className="absolute top-20 left-0 right-0 mx-4 z-40">
-              <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative">
-                {error}
+                {showChat && (
+                  <RideChat rideId={currentRide._id} />
+                )}
               </div>
-            </div>
-          )}
+            ) : (
+              <div className="space-y-4">
+                <h2 className="text-2xl font-bold">Corridas Disponíveis</h2>
+                {availableRides.length === 0 ? (
+                  <p className="text-gray-500">Nenhuma corrida disponível no momento</p>
+                ) : (
+                  <div className="grid gap-4">
+                    {availableRides.map(ride => (
+                      <div key={ride._id} className="border p-4 rounded-lg">
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <p className="font-semibold">De: {ride.origin.address}</p>
+                            <p className="font-semibold">Para: {ride.destination.address}</p>
+                            <p className="text-gray-600">Distância: {(ride.distance / 1000).toFixed(1)} km</p>
+                            <p className="text-gray-600">Duração: {Math.round(ride.duration / 60)} min</p>
+                            <p className="text-lg font-bold text-green-600">R$ {ride.price.toFixed(2)}</p>
+                          </div>
+                          <button
+                            onClick={() => handleAcceptRide(ride._id)}
+                            className="bg-green-600 text-white py-2 px-4 rounded hover:bg-green-700"
+                          >
+                            Aceitar
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
-      </LoadScript>
+      </div>
     </div>
   );
 } 

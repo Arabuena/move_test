@@ -24,22 +24,46 @@ export function AuthProvider({ children }) {
 
   const login = async (email, password) => {
     try {
-      console.log('Tentando login:', { email });
-      const response = await api.post('/auth/login', { email, password });
-      console.log('Resposta do login:', response.data);
-
-      const { token, user } = response.data;
+      console.log('Iniciando login:', { email });
+      const response = await api.post('/auth/login', { 
+        email, 
+        password,
+        deviceType: 'mobile',
+        platform: 'android'
+      });
       
-      localStorage.setItem('token', token);
-      localStorage.setItem('user', JSON.stringify(user));
-      
-      setUser(user);
-      api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-      
-      return user;
+      if (response?.data?.token) {
+        const userData = response.data.user;
+        console.log('Dados do usuário:', userData);
+        
+        localStorage.setItem('token', response.data.token);
+        localStorage.setItem('user', JSON.stringify(userData));
+        setUser(userData);
+        
+        // Determina o tipo de usuário
+        const userType = userData.type || userData.role || 'user';
+        console.log('Login bem sucedido:', {
+          userType,
+          userData,
+          redirectTo: userType === 'driver' ? '/driver-dashboard' 
+                     : userType === 'admin' ? '/admin'
+                     : '/request-ride'
+        });
+        
+        return {
+          success: true,
+          userType: userType
+        };
+      }
+      return { success: false };
     } catch (error) {
-      console.error('Erro no login:', error.response?.data || error);
-      throw error.response?.data?.message || 'Erro ao fazer login';
+      console.error('Erro no login:', {
+        status: error.response?.status,
+        data: error.response?.data,
+        message: error.message,
+        config: error.config
+      });
+      throw new Error(error.response?.data?.message || 'Erro ao fazer login');
     }
   };
 

@@ -1,79 +1,103 @@
 import React from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Navigate, Routes, Route } from 'react-router-dom';
+import { useAuth } from './contexts/AuthContext';
+
 import LoginPage from './pages/LoginPage';
 import HomePage from './pages/HomePage';
 import RequestRide from './pages/RequestRide';
 import DriverDashboard from './pages/DriverDashboard';
 import AdminDashboard from './pages/AdminDashboard';
-import { useAuth } from './contexts/AuthContext';
 
-// Componente para proteger rotas
-const PrivateRoute = ({ children, allowedRoles = [] }) => {
+// Componente para redirecionar usuários logados
+const PublicRoute = ({ children }) => {
   const { user } = useAuth();
   
-  console.log('PrivateRoute - Verificando autenticação:', {
-    user,
-    allowedRoles,
-    path: window.location.pathname
-  });
+  if (user) {
+    // Redireciona baseado no tipo de usuário
+    switch (user.role?.toLowerCase()) {
+      case 'driver':
+        return <Navigate to="/driver-dashboard" />;
+      case 'admin':
+        return <Navigate to="/admin" />;
+      default:
+        return <Navigate to="/request-ride" />;
+    }
+  }
+
+  return children;
+};
+
+// Componente para proteger rotas que precisam de autenticação
+const PrivateRoute = ({ children, allowedRoles = [] }) => {
+  const { user } = useAuth();
 
   if (!user) {
-    console.log('PrivateRoute - Usuário não autenticado');
     return <Navigate to="/login" />;
   }
 
-  console.log('PrivateRoute - Verificando permissões:', {
-    userRole: user.role,
-    allowedRoles,
-    path: window.location.pathname
-  });
-
-  if (allowedRoles.length > 0 && !allowedRoles.includes(user.role)) {
-    console.log('PrivateRoute - Acesso negado: role não permitida');
-    return <Navigate to="/home" />;
+  if (allowedRoles.length > 0 && !allowedRoles.includes(user.role?.toLowerCase())) {
+    // Redireciona para o dashboard apropriado se tentar acessar uma rota não permitida
+    switch (user.role?.toLowerCase()) {
+      case 'driver':
+        return <Navigate to="/driver-dashboard" />;
+      case 'admin':
+        return <Navigate to="/admin" />;
+      default:
+        return <Navigate to="/request-ride" />;
+    }
   }
 
-  console.log('PrivateRoute - Acesso permitido');
   return children;
 };
 
 export default function AppRoutes() {
   return (
     <Routes>
-      <Route path="/" element={<HomePage />} />
-      <Route path="/login" element={<LoginPage />} />
-      
-      {/* Rota do Passageiro */}
+      {/* Rotas públicas */}
       <Route 
-        path="/request-ride" 
+        path="/" 
+        element={
+          <PublicRoute>
+            <HomePage />
+          </PublicRoute>
+        } 
+      />
+      <Route 
+        path="/login" 
+        element={
+          <PublicRoute>
+            <LoginPage />
+          </PublicRoute>
+        } 
+      />
+
+      {/* Rotas protegidas */}
+      <Route
+        path="/request-ride"
         element={
           <PrivateRoute allowedRoles={['user', 'passenger']}>
             <RequestRide />
           </PrivateRoute>
-        } 
+        }
       />
-
-      {/* Rota do Motorista */}
-      <Route 
-        path="/driver-dashboard" 
+      <Route
+        path="/driver-dashboard"
         element={
           <PrivateRoute allowedRoles={['driver']}>
             <DriverDashboard />
           </PrivateRoute>
-        } 
+        }
       />
-
-      {/* Rota do Admin */}
-      <Route 
-        path="/admin" 
+      <Route
+        path="/admin"
         element={
           <PrivateRoute allowedRoles={['admin']}>
             <AdminDashboard />
           </PrivateRoute>
-        } 
+        }
       />
 
-      {/* Rota padrão para não encontrado */}
+      {/* Redireciona qualquer outra rota para a página apropriada */}
       <Route path="*" element={<Navigate to="/" />} />
     </Routes>
   );

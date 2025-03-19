@@ -19,22 +19,17 @@ export default function LoginPage() {
 
     try {
       const result = await login(formData.email, formData.password);
-      console.log('Login bem sucedido:', result);
       
-      // Redireciona baseado no tipo de usuário
+      // Redireciona direto para o dashboard apropriado
       switch (result.user?.role?.toLowerCase()) {
         case 'driver':
-          navigate('/driver-dashboard');
-          break;
-        case 'user':
-        case 'passenger':
-          navigate('/request-ride');
+          navigate('/driver-dashboard', { replace: true });
           break;
         case 'admin':
-          navigate('/admin');
+          navigate('/admin', { replace: true });
           break;
         default:
-          navigate('/home');
+          navigate('/request-ride', { replace: true });
       }
     } catch (error) {
       console.error('Erro no login:', error);

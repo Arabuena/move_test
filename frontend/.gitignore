@@ -19,4 +19,10 @@
 
 npm-debug.log*
 yarn-debug.log*
-yarn-error.log* 
+yarn-error.log*
+
+# Não ignorar assets
+!src/assets/
+!src/assets/images/
+!src/assets/images/*.png
+!public/*.png 

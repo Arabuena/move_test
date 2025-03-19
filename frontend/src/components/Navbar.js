@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useMessages } from '../contexts/MessageContext';
+import logoFull from '../assets/images/logo-full.png';
 
 export default function Navbar() {
   const { user, logout } = useAuth();
@@ -20,7 +21,11 @@ export default function Navbar() {
         <div className="flex justify-between h-16">
           <div className="flex">
             <Link to="/" className="flex items-center">
-              <span className="text-white text-xl font-bold">Move</span>
+              <img 
+                src={logoFull} 
+                alt="Move" 
+                className="h-8 w-auto"
+              />
             </Link>
           </div>
 

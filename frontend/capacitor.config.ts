@@ -1,8 +1,8 @@
 import { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.levaapp.app',
-  appName: 'Leva App',
+  appId: 'com.moveapp.app',
+  appName: 'Move',
   webDir: 'build',
   server: {
     androidScheme: 'https',

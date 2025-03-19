@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Leva App</string>
-    <string name="title_activity_main">Leva App</string>
-    <string name="package_name">com.levaapp.app</string>
-    <string name="custom_url_scheme">com.levaapp.app</string>
+    <string name="app_name">Move</string>
+    <string name="title_activity_main">Move</string>
+    <string name="package_name">com.moveapp.app</string>
+    <string name="custom_url_scheme">com.moveapp.app</string>
 </resources>

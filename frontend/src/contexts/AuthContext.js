@@ -24,46 +24,66 @@ export function AuthProvider({ children }) {
 
   const login = async (email, password) => {
     try {
-      console.log('Iniciando login:', { email });
-      const response = await api.post('/auth/login', { 
-        email, 
+      console.log('Iniciando tentativa de login:', { email });
+      console.log('URL da API:', api.defaults.baseURL);
+
+      // Adiciona informações do dispositivo
+      const loginData = {
+        email,
         password,
         deviceType: 'mobile',
         platform: 'android'
-      });
+      };
+
+      console.log('Dados de login:', loginData);
+
+      const response = await api.post('/auth/login', loginData);
       
-      if (response?.data?.token) {
-        const userData = response.data.user;
-        console.log('Dados do usuário:', userData);
-        
-        localStorage.setItem('token', response.data.token);
-        localStorage.setItem('user', JSON.stringify(userData));
-        setUser(userData);
-        
-        // Determina o tipo de usuário
-        const userType = userData.type || userData.role || 'user';
-        console.log('Login bem sucedido:', {
-          userType,
-          userData,
-          redirectTo: userType === 'driver' ? '/driver-dashboard' 
-                     : userType === 'admin' ? '/admin'
-                     : '/request-ride'
-        });
-        
-        return {
-          success: true,
-          userType: userType
-        };
+      console.log('Resposta completa:', response);
+      console.log('Dados da resposta:', response.data);
+
+      if (!response.data.token) {
+        throw new Error('Token não encontrado na resposta');
       }
-      return { success: false };
+
+      const { token, user } = response.data;
+      
+      // Configura o token nas requisições
+      api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      
+      // Salva os dados
+      localStorage.setItem('token', token);
+      localStorage.setItem('user', JSON.stringify(user));
+      setUser(user);
+
+      return {
+        success: true,
+        user,
+        token
+      };
     } catch (error) {
-      console.error('Erro no login:', {
-        status: error.response?.status,
-        data: error.response?.data,
+      console.error('Erro detalhado:', {
         message: error.message,
-        config: error.config
+        response: error.response?.data,
+        status: error.response?.status,
+        url: error.config?.url,
+        baseURL: api.defaults.baseURL
       });
-      throw new Error(error.response?.data?.message || 'Erro ao fazer login');
+
+      // Mensagem de erro mais específica
+      let errorMessage = 'Erro ao fazer login';
+      
+      if (!navigator.onLine) {
+        errorMessage = 'Sem conexão com a internet';
+      } else if (error.response?.status === 401) {
+        errorMessage = 'Email ou senha incorretos';
+      } else if (error.response?.status === 404) {
+        errorMessage = 'Servidor não encontrado';
+      } else if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      }
+
+      throw new Error(errorMessage);
     }
   };
 

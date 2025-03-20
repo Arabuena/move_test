@@ -27,25 +27,38 @@ const defaultCenter = {
   lng: -46.633308
 };
 
-// Constantes para geolocalização
+// Remover constantes não utilizadas
 const GEO_CONFIG = {
   enableHighAccuracy: true,
-  timeout: 20000,        // Aumentado para 20 segundos
-  maximumAge: 30000,     // Cache de 30 segundos
-  retryAttempts: 2,      // Número de tentativas
-  retryDelay: 3000       // Delay entre tentativas
+  timeout: 20000,
+  maximumAge: 30000,
+  retryAttempts: 2,
+  retryDelay: 3000
 };
 
-// Adicionar constantes no topo do arquivo
+// Ajustar configurações de polling
 const POLLING_CONFIG = {
-  interval: 30000,        // 30 segundos entre cada verificação
-  retryDelay: 5000,      // 5 segundos para retry em caso de erro
-  notificationDuration: 15000 // Notificação fica visível por 15 segundos
+  interval: 30000,        // 30 segundos entre polls
+  retryDelay: 5000,      // 5 segundos para retry
+  notificationDuration: 15000,
+  minPollingInterval: 15000, // Mínimo 15 segundos entre requisições
+  maxRetries: 3          // Máximo de tentativas em caso de erro
 };
 
 // Função para gerar ID único
 const generateUniqueId = () => {
   return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+};
+
+// Ajustar configurações de áudio
+const AUDIO_CONFIG = {
+  volume: 0.8,           // Volume alto
+  maxRetries: 3,         // Tentativas para cada reprodução
+  retryDelay: 500,       // Delay entre tentativas
+  notificationSound: '/sounds/notification.mp3',
+  preloadAttempts: 2,    // Tentativas de pré-carregamento
+  repeatInterval: 3000,  // Tocar a cada 3 segundos
+  maxRepetitions: 10     // Máximo de repetições (30 segundos total)
 };
 
 export default function DriverDashboard() {
@@ -60,16 +73,139 @@ export default function DriverDashboard() {
   const [directionsRenderer, setDirectionsRenderer] = useState(null);
   const [showChat, setShowChat] = useState(false);
   const [locationError, setLocationError] = useState(null);
-  const [locationStatus, setLocationStatus] = useState('pending'); // 'pending' | 'granted' | 'denied'
-  const [audioPermission, setAudioPermission] = useState(false);
-  const [showAudioPrompt, setShowAudioPrompt] = useState(true);
+  const [locationStatus, setLocationStatus] = useState('pending');
+  const [audioEnabled, setAudioEnabled] = useState(() => {
+    return localStorage.getItem('audioEnabled') === 'true';
+  });
+
+  // Ref para controlar throttling
+  const lastFetchRef = useRef(Date.now());
+  const retryCountRef = useRef(0);
+  const [lastUpdate, setLastUpdate] = useState(Date.now());
+
+  // Refs necessárias
+  const mapRef = useRef(null);
   const lastLocationRef = useRef(null);
   const geoErrorTimeoutRef = useRef(null);
-
-  // Refs
-  const mapRef = useRef(null);
   const pollingIntervalRef = useRef(null);
-  const [audio] = useState(new Audio('/sounds/notification.mp3'));
+
+  // Adicionar ref para controlar repetição
+  const audioInstanceRef = useRef(null);
+  const repeatIntervalRef = useRef(null);
+  const repeatCountRef = useRef(0);
+
+  // Função para carregar o mapa
+  const onMapLoad = useCallback((map) => {
+    mapRef.current = map;
+  }, []);
+
+  // Função para limpar rota do mapa
+  const clearMapRoute = useCallback(() => {
+    if (mapRef.current) {
+      mapRef.current = null;
+    }
+  }, []);
+
+  // Pré-carregar áudio
+  useEffect(() => {
+    const preloadAudio = async (attempts = AUDIO_CONFIG.preloadAttempts) => {
+      try {
+        const audio = new Audio(AUDIO_CONFIG.notificationSound);
+        audio.volume = AUDIO_CONFIG.volume;
+        audio.preload = 'auto';
+        
+        // Forçar carregamento
+        await audio.load();
+        
+        audioInstanceRef.current = audio;
+      } catch (error) {
+        console.error('Erro ao pré-carregar áudio:', error);
+        if (attempts > 0) {
+          setTimeout(() => preloadAudio(attempts - 1), 1000);
+        }
+      }
+    };
+
+    preloadAudio();
+
+    // Cleanup
+    return () => {
+      if (audioInstanceRef.current) {
+        audioInstanceRef.current.pause();
+        audioInstanceRef.current = null;
+      }
+    };
+  }, []);
+
+  // Função para parar o som
+  const stopNotificationSound = useCallback(() => {
+    if (repeatIntervalRef.current) {
+      clearInterval(repeatIntervalRef.current);
+      repeatIntervalRef.current = null;
+    }
+    repeatCountRef.current = 0;
+    
+    if (audioInstanceRef.current) {
+      audioInstanceRef.current.pause();
+      audioInstanceRef.current.currentTime = 0;
+    }
+  }, []);
+
+  // Função otimizada para tocar som repetidamente
+  const playNotificationSound = useCallback(() => {
+    if (!audioEnabled) return;
+
+    // Parar reprodução anterior se existir
+    stopNotificationSound();
+
+    const playWithRetry = async (retries = AUDIO_CONFIG.maxRetries) => {
+      try {
+        if (!audioInstanceRef.current) {
+          audioInstanceRef.current = new Audio(AUDIO_CONFIG.notificationSound);
+          audioInstanceRef.current.volume = AUDIO_CONFIG.volume;
+          await audioInstanceRef.current.load();
+        }
+
+        const audio = audioInstanceRef.current;
+        audio.currentTime = 0;
+        await audio.play();
+
+      } catch (error) {
+        console.error('Erro ao tocar som:', error);
+        audioInstanceRef.current = null;
+        
+        if (retries > 0) {
+          setTimeout(() => playWithRetry(retries - 1), AUDIO_CONFIG.retryDelay);
+        }
+      }
+    };
+
+    // Iniciar reprodução repetida
+    playWithRetry();
+    repeatIntervalRef.current = setInterval(() => {
+      if (repeatCountRef.current >= AUDIO_CONFIG.maxRepetitions) {
+        stopNotificationSound();
+        return;
+      }
+      repeatCountRef.current++;
+      playWithRetry();
+    }, AUDIO_CONFIG.repeatInterval);
+
+  }, [audioEnabled, stopNotificationSound]);
+
+  // Função para alternar som
+  const toggleAudio = useCallback(() => {
+    const newState = !audioEnabled;
+    setAudioEnabled(newState);
+    localStorage.setItem('audioEnabled', String(newState));
+    
+    setError(newState ? 'Som ativado!' : 'Som desativado');
+    setTimeout(() => setError(''), 2000);
+
+    if (newState) {
+      playNotificationSound();
+    }
+  }, [audioEnabled, playNotificationSound]);
 
   // 1. Primeiro definir calculateRoute
   const calculateRoute = useCallback(async (destination) => {
@@ -280,143 +416,71 @@ export default function DriverDashboard() {
     };
   }, [isOnline, currentRide, calculateRoute, requestLocationPermission]);
 
-  // Atualizar a função de solicitar permissão de áudio
-  const requestAudioPermission = useCallback(async () => {
-    try {
-      // Tenta tocar o áudio
-      await audio.play();
-      // Se conseguir tocar, pausa imediatamente
-      audio.pause();
-      audio.currentTime = 0;
-      
-      // Atualiza os estados
-      setAudioPermission(true);
-      setShowAudioPrompt(false);
-      
-      // Feedback visual
-      setError('Notificações sonoras ativadas com sucesso!');
-      setTimeout(() => setError(''), 3000);
-    } catch (error) {
-      console.error('Erro ao solicitar permissão de áudio:', error);
-      
-      // Se falhar, mostra mensagem explicativa
-      setError('Para ativar as notificações, clique em qualquer lugar da tela');
-      
-      // Adiciona listener para primeira interação
-      const handleFirstInteraction = async () => {
-        try {
-          await audio.play();
-          audio.pause();
-          audio.currentTime = 0;
-          
-          setAudioPermission(true);
-          setShowAudioPrompt(false);
-          setError('Notificações sonoras ativadas com sucesso!');
-          setTimeout(() => setError(''), 3000);
-          
-          // Remove os listeners após sucesso
-          document.removeEventListener('click', handleFirstInteraction);
-          document.removeEventListener('touchstart', handleFirstInteraction);
-        } catch (err) {
-          console.error('Erro ao ativar áudio após interação:', err);
-          setError('Não foi possível ativar as notificações sonoras');
-        }
-      };
-      
-      document.addEventListener('click', handleFirstInteraction);
-      document.addEventListener('touchstart', handleFirstInteraction);
-    }
-  }, [audio]);
-
-  // Atualizar a função de notificação
-  const playNotification = useCallback(() => {
-    if (!audioPermission) return;
-
-    try {
-      audio.currentTime = 0;
-      const playPromise = audio.play();
-      
-      if (playPromise !== undefined) {
-        playPromise.catch((error) => {
-          console.error('Erro ao tocar áudio:', error);
-        });
-      }
-    } catch (error) {
-      console.error('Erro ao tocar notificação:', error);
-    }
-  }, [audio, audioPermission]);
-
-  // Configurar o áudio quando o componente montar
-  useEffect(() => {
-    audio.preload = 'auto';
-    audio.volume = 1.0;
-    
-    // Tenta pré-carregar o áudio
-    const loadAudio = () => {
-      const loadPromise = audio.load();
-      if (loadPromise !== undefined) {
-        loadPromise.catch(error => {
-          console.error('Erro ao carregar áudio:', error);
-        });
-      }
-    };
-    loadAudio();
-
-    return () => {
-      audio.pause();
-    };
-  }, [audio]);
-
-  // Atualizar fetchAvailableRides para mostrar toast ao invés de popup
+  // Função otimizada para buscar corridas
   const fetchAvailableRides = useCallback(async () => {
-    if (!isOnline) return;
+    if (!isOnline || currentRide) return;
+
+    // Controle de throttling
+    const now = Date.now();
+    if (now - lastFetchRef.current < POLLING_CONFIG.minPollingInterval) {
+      return;
+    }
 
     try {
-      console.log('Buscando corridas disponíveis...');
+      lastFetchRef.current = now;
       const rides = await rideService.getAvailableRides();
       
-      // Verificar novas corridas
       const newRides = rides.filter(ride => 
         !availableRides.some(existing => existing._id === ride._id)
       );
 
       if (newRides.length > 0) {
-        console.log(`${newRides.length} nova(s) corrida(s) encontrada(s)`);
-        if (audioPermission) {
-          playNotification();
-        }
+        playNotificationSound();
       }
       
       setAvailableRides(rides);
+      setLastUpdate(now);
       setError('');
+      retryCountRef.current = 0; // Reset contador de tentativas
     } catch (error) {
       console.error('Erro ao buscar corridas:', error);
-      if (!error.message.includes('timeout')) {
+      
+      // Lógica de retry
+      if (retryCountRef.current < POLLING_CONFIG.maxRetries) {
+        retryCountRef.current++;
+        setTimeout(fetchAvailableRides, POLLING_CONFIG.retryDelay);
+      } else if (!error.message.includes('timeout')) {
         setError('Erro ao buscar corridas disponíveis');
       }
     }
-  }, [isOnline, availableRides, audioPermission, playNotification]);
+  }, [isOnline, currentRide, availableRides, playNotificationSound]);
+
+  // Usar debounce para o polling
+  const debouncedFetch = useCallback(
+    debounce(fetchAvailableRides, 1000),
+    [fetchAvailableRides]
+  );
 
   // Atualizar useEffect do polling
   useEffect(() => {
     let intervalId;
-    let retryTimeout;
 
-    const startPolling = () => {
-      if (!isOnline || currentRide) return;
-
-      fetchAvailableRides();
-      intervalId = setInterval(fetchAvailableRides, POLLING_CONFIG.interval);
-    };
-
-    startPolling();
+    if (isOnline && !currentRide) {
+      // Primeira busca
+      debouncedFetch();
+      
+      // Configurar intervalo
+      intervalId = setInterval(debouncedFetch, POLLING_CONFIG.interval);
+      pollingIntervalRef.current = intervalId;
+    }
 
     return () => {
-      if (intervalId) clearInterval(intervalId);
-      if (retryTimeout) clearTimeout(retryTimeout);
-      audio.pause(); // Limpar áudio ao desmontar
+      if (intervalId) {
+        clearInterval(intervalId);
+        pollingIntervalRef.current = null;
+      }
     };
-  }, [fetchAvailableRides, isOnline, currentRide, audio]);
+  }, [isOnline, currentRide, debouncedFetch]);
 
   // 2. Depois definir fetchAvailableRide que usa playNotification
   const fetchAvailableRide = useCallback(async () => {
@@ -425,25 +489,18 @@ export default function DriverDashboard() {
       const response = await api.get('/rides/available');
       if (response.data.length > 0) {
         setAvailableRides(response.data);
-        playNotification();
+        playNotificationSound();
       }
     } catch (error) {
       console.error('Erro ao buscar corridas:', error);
     }
-  }, [isOnline, currentRide, playNotification]);
+  }, [isOnline, currentRide, playNotificationSound]);
 
   // 3. Depois definir debouncedFetch que usa fetchAvailableRide
-  const debouncedFetch = useCallback(
+  const debouncedFetchRide = useCallback(
     () => debounce(() => fetchAvailableRide(), 1000),
     [fetchAvailableRide]
   );
-
-  const clearMapRoute = useCallback(() => {
-    if (directionsRenderer) {
-      directionsRenderer.setMap(null);
-      setDirectionsRenderer(null);
-    }
-  }, [directionsRenderer]);
 
   // Função para processar dados da corrida
   const processRideData = useCallback((ride) => {
@@ -524,14 +581,6 @@ export default function DriverDashboard() {
     });
   }, []);
 
-  const onMapLoad = useCallback((map) => {
-    mapRef.current = map;
-    
-    if (currentLocation) {
-      renderMarker(currentLocation);
-    }
-  }, [currentLocation, renderMarker]);
-
   // Renderizar mensagem de erro de localização
   const renderLocationError = () => {
     if (!locationError) return null;
@@ -576,10 +625,10 @@ export default function DriverDashboard() {
   const handleAcceptRide = async (rideId) => {
     try {
       setLoading(true);
+      stopNotificationSound(); // Parar som ao aceitar corrida
       const updatedRide = await rideService.acceptRide(rideId);
       setCurrentRide(updatedRide);
       
-      // Calcular rota após aceitar
       if (updatedRide.origin?.coordinates) {
         calculateRoute(updatedRide.origin.coordinates);
       }
@@ -665,44 +714,33 @@ export default function DriverDashboard() {
     }
   }, []);
 
-  // Atualizar o componente AudioPermissionPrompt
-  const AudioPermissionPrompt = () => {
-    if (!showAudioPrompt || audioPermission) return null;
+  // Remover o AudioPermissionPrompt e usar apenas o AudioToggleButton
+  const AudioToggleButton = () => (
+    <button
+      onClick={toggleAudio}
+      className={`flex items-center space-x-1 px-3 py-1 rounded-lg transition-colors duration-200 ${
+        audioEnabled ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-600'
+      }`}
+    >
+      {audioEnabled ? (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15.536a5 5 0 001.414 1.414m2.828-9.9a9 9 0 012.828-2.828" />
+        </svg>
+      ) : (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.586 15.536a5 5 0 001.414 1.414m2.828-9.9a9 9 0 012.828-2.828" />
+        </svg>
+      )}
+      <span className="text-sm">{audioEnabled ? 'Som On' : 'Som Off'}</span>
+    </button>
+  );
 
-    return (
-      <div className="fixed bottom-20 left-0 right-0 mx-4 bg-white rounded-lg shadow-lg p-4 border border-gray-200 z-50">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <svg className="w-6 h-6 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15.536a5 5 0 001.414 1.414m2.828-9.9a9 9 0 012.828-2.828" />
-            </svg>
-            <div>
-              <p className="font-medium">Ativar notificações sonoras?</p>
-              <p className="text-sm text-gray-500">Para receber alertas de novas corridas</p>
-            </div>
-          </div>
-          <div className="flex space-x-2">
-            <button
-              onClick={() => {
-                setShowAudioPrompt(false);
-                setError('Você pode ativar as notificações depois nas configurações');
-                setTimeout(() => setError(''), 3000);
-              }}
-              className="px-3 py-1 text-sm text-gray-600 hover:text-gray-800"
-            >
-              Depois
-            </button>
-            <button
-              onClick={requestAudioPermission}
-              className="px-4 py-2 bg-blue-500 text-white rounded-md text-sm hover:bg-blue-600 transition-colors duration-200"
-            >
-              Ativar
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  };
+  // Cleanup
+  useEffect(() => {
+    return () => {
+      stopNotificationSound();
+    };
+  }, [stopNotificationSound]);
 
   if (loading) {
     return (
@@ -720,9 +758,12 @@ export default function DriverDashboard() {
       {/* Barra de Status */}
       <div className="fixed top-0 left-0 right-0 bg-white shadow-md z-50">
         <div className="container mx-auto px-4 py-2 flex justify-between items-center">
-          <div className="flex items-center space-x-2">
-            <div className={`w-3 h-3 rounded-full ${isOnline ? 'bg-green-500' : 'bg-red-500'}`}></div>
-            <span className="text-sm font-medium">{isOnline ? 'Online' : 'Offline'}</span>
+          <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2">
+              <div className={`w-3 h-3 rounded-full ${isOnline ? 'bg-green-500' : 'bg-red-500'}`}></div>
+              <span className="text-sm font-medium">{isOnline ? 'Online' : 'Offline'}</span>
+            </div>
+            <AudioToggleButton />
           </div>
           
           <button
@@ -869,7 +910,7 @@ export default function DriverDashboard() {
         <div className="container mx-auto flex justify-between items-center">
           <div>
             <p className="text-sm font-medium">Status: {isOnline ? 'Disponível' : 'Indisponível'}</p>
-            <p className="text-xs text-gray-500">Última atualização: {new Date().toLocaleTimeString()}</p>
+            <p className="text-xs text-gray-500">Última atualização: {new Date(lastUpdate).toLocaleTimeString()}</p>
           </div>
           {showChat && currentRide && (
             <button
@@ -881,9 +922,6 @@ export default function DriverDashboard() {
           )}
         </div>
       </div>
-
-      {/* Prompt de permissão de áudio */}
-      <AudioPermissionPrompt />
     </div>
   );
 } 

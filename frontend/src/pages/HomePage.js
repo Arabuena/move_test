@@ -266,7 +266,7 @@ export default function HomePage() {
             </p>
             <div className="mt-8 flex justify-center">
               <a
-                href="https://drive.google.com/file/d/14Eo_BqTkBUdZLuQlYmam5IuoMbIpgdUH/view?usp=sharing"
+                href="https://webtoapp.design/apps/apk_landing/Ijk2MjUzIg.4CcjAYdSwI-kGnYKSAxlmj5lZWM?utm_source=move&utm_medium=referral&utm_campaign=apk_landing"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center px-8 py-4 border-2 border-white text-base font-medium rounded-md text-white hover:bg-white hover:text-purple-900 transition-all duration-200"

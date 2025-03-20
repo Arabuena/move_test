@@ -528,6 +528,71 @@ export default function DriverDashboard() {
     }
   };
 
+  // Adicionar função calculateRoute
+  const calculateRoute = useCallback(async (destination) => {
+    if (!currentLocation || !destination) return;
+
+    const directionsService = new window.google.maps.DirectionsService();
+
+    try {
+      const result = await directionsService.route({
+        origin: currentLocation,
+        destination: {
+          lat: destination[1],
+          lng: destination[0]
+        },
+        travelMode: window.google.maps.TravelMode.DRIVING
+      });
+
+      setDirections(result);
+
+      // Se já existe um DirectionsRenderer, atualize-o
+      if (directionsRenderer) {
+        directionsRenderer.setDirections(result);
+      } else {
+        // Caso contrário, crie um novo
+        const renderer = new window.google.maps.DirectionsRenderer();
+        renderer.setMap(mapRef.current);
+        renderer.setDirections(result);
+        setDirectionsRenderer(renderer);
+      }
+    } catch (error) {
+      console.error('Erro ao calcular rota:', error);
+      setError('Não foi possível calcular a rota');
+    }
+  }, [currentLocation, directionsRenderer]);
+
+  // Atualizar localização atual
+  useEffect(() => {
+    if (navigator.geolocation) {
+      const watchId = navigator.geolocation.watchPosition(
+        (position) => {
+          const newLocation = {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude
+          };
+          setCurrentLocation(newLocation);
+
+          // Se estiver em uma corrida, recalcular rota
+          if (currentRide?.origin?.coordinates) {
+            calculateRoute(currentRide.origin.coordinates);
+          }
+        },
+        (error) => {
+          console.error('Erro ao obter localização:', error);
+          setError('Não foi possível obter sua localização');
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 5000,
+          maximumAge: 0
+        }
+      );
+
+      return () => navigator.geolocation.clearWatch(watchId);
+    }
+  }, [currentRide, calculateRoute]);
+
   if (loading) {
     return (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">

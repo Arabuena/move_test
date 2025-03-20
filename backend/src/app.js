@@ -22,7 +22,10 @@ app.use(express.json());
 
 // Rotas
 const authRoutes = require('./routes/auth');
+const ridesRoutes = require('./routes/rides');
+
 app.use('/api/auth', authRoutes);
+app.use('/api/rides', ridesRoutes);
 
 // Middleware de erro
 app.use((err, req, res, next) => {

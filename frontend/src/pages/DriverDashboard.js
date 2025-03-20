@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import api from '../services/api';
-import { GoogleMap, DirectionsRenderer, Marker } from '@react-google-maps/api';
+import { GoogleMap, DirectionsRenderer } from '@react-google-maps/api';
 import RideStatus from '../components/RideStatus';
-import RideChat from '../components/RideChat';
 import { rideService } from '../services/rideService';
 
 const mapContainerStyle = {
@@ -37,6 +36,18 @@ const GEO_CONFIG = {
   retryDelay: 3000       // Delay entre tentativas
 };
 
+// Adicionar constantes no topo do arquivo
+const POLLING_CONFIG = {
+  interval: 30000,        // 30 segundos entre cada verificação
+  retryDelay: 5000,      // 5 segundos para retry em caso de erro
+  notificationDuration: 15000 // Notificação fica visível por 15 segundos
+};
+
+// Função para gerar ID único
+const generateUniqueId = () => {
+  return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+};
+
 export default function DriverDashboard() {
   // Estados
   const [currentRide, setCurrentRide] = useState(null);
@@ -52,7 +63,6 @@ export default function DriverDashboard() {
   const [locationStatus, setLocationStatus] = useState('pending'); // 'pending' | 'granted' | 'denied'
   const [audioPermission, setAudioPermission] = useState(false);
   const [showAudioPrompt, setShowAudioPrompt] = useState(true);
-  const [geoRetryCount, setGeoRetryCount] = useState(0);
   const lastLocationRef = useRef(null);
   const geoErrorTimeoutRef = useRef(null);
 
@@ -60,7 +70,6 @@ export default function DriverDashboard() {
   const mapRef = useRef(null);
   const pollingIntervalRef = useRef(null);
   const [audio] = useState(new Audio('/sounds/notification.mp3'));
-  const [lastRideCount, setLastRideCount] = useState(0);
 
   // 1. Primeiro definir calculateRoute
   const calculateRoute = useCallback(async (destination) => {
@@ -104,14 +113,12 @@ export default function DriverDashboard() {
               lat: position.coords.latitude,
               lng: position.coords.longitude
             };
-            setGeoRetryCount(0);
             resolve(position);
           },
           (error) => {
             if (retries > 1) {
               setTimeout(() => tryGetPosition(retries - 1), GEO_CONFIG.retryDelay);
             } else {
-              // Se temos uma localização anterior, usamos ela
               if (lastLocationRef.current) {
                 resolve({ coords: lastLocationRef.current });
               } else {
@@ -273,21 +280,52 @@ export default function DriverDashboard() {
     };
   }, [isOnline, currentRide, calculateRoute, requestLocationPermission]);
 
-  // Função para solicitar permissão de áudio
-  const requestAudioPermission = useCallback(() => {
-    setShowAudioPrompt(false);
-    setAudioPermission(true);
-    // Toca um som silencioso para garantir que futuras reproduções funcionem
-    const silentPlay = async () => {
-      try {
-        await audio.play();
-        audio.pause();
-        audio.currentTime = 0;
-      } catch (error) {
-        console.error('Erro ao inicializar áudio:', error);
-      }
-    };
-    silentPlay();
+  // Atualizar a função de solicitar permissão de áudio
+  const requestAudioPermission = useCallback(async () => {
+    try {
+      // Tenta tocar o áudio
+      await audio.play();
+      // Se conseguir tocar, pausa imediatamente
+      audio.pause();
+      audio.currentTime = 0;
+      
+      // Atualiza os estados
+      setAudioPermission(true);
+      setShowAudioPrompt(false);
+      
+      // Feedback visual
+      setError('Notificações sonoras ativadas com sucesso!');
+      setTimeout(() => setError(''), 3000);
+    } catch (error) {
+      console.error('Erro ao solicitar permissão de áudio:', error);
+      
+      // Se falhar, mostra mensagem explicativa
+      setError('Para ativar as notificações, clique em qualquer lugar da tela');
+      
+      // Adiciona listener para primeira interação
+      const handleFirstInteraction = async () => {
+        try {
+          await audio.play();
+          audio.pause();
+          audio.currentTime = 0;
+          
+          setAudioPermission(true);
+          setShowAudioPrompt(false);
+          setError('Notificações sonoras ativadas com sucesso!');
+          setTimeout(() => setError(''), 3000);
+          
+          // Remove os listeners após sucesso
+          document.removeEventListener('click', handleFirstInteraction);
+          document.removeEventListener('touchstart', handleFirstInteraction);
+        } catch (err) {
+          console.error('Erro ao ativar áudio após interação:', err);
+          setError('Não foi possível ativar as notificações sonoras');
+        }
+      };
+      
+      document.addEventListener('click', handleFirstInteraction);
+      document.addEventListener('touchstart', handleFirstInteraction);
+    }
   }, [audio]);
 
   // Atualizar a função de notificação
@@ -328,6 +366,57 @@ export default function DriverDashboard() {
       audio.pause();
     };
   }, [audio]);
+
+  // Atualizar fetchAvailableRides para mostrar toast ao invés de popup
+  const fetchAvailableRides = useCallback(async () => {
+    if (!isOnline) return;
+
+    try {
+      console.log('Buscando corridas disponíveis...');
+      const rides = await rideService.getAvailableRides();
+      
+      // Verificar novas corridas
+      const newRides = rides.filter(ride => 
+        !availableRides.some(existing => existing._id === ride._id)
+      );
+
+      if (newRides.length > 0) {
+        console.log(`${newRides.length} nova(s) corrida(s) encontrada(s)`);
+        if (audioPermission) {
+          playNotification();
+        }
+      }
+      
+      setAvailableRides(rides);
+      setError('');
+    } catch (error) {
+      console.error('Erro ao buscar corridas:', error);
+      if (!error.message.includes('timeout')) {
+        setError('Erro ao buscar corridas disponíveis');
+      }
+    }
+  }, [isOnline, availableRides, audioPermission, playNotification]);
+
+  // Atualizar useEffect do polling
+  useEffect(() => {
+    let intervalId;
+    let retryTimeout;
+
+    const startPolling = () => {
+      if (!isOnline || currentRide) return;
+
+      fetchAvailableRides();
+      intervalId = setInterval(fetchAvailableRides, POLLING_CONFIG.interval);
+    };
+
+    startPolling();
+
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+      if (retryTimeout) clearTimeout(retryTimeout);
+      audio.pause(); // Limpar áudio ao desmontar
+    };
+  }, [fetchAvailableRides, isOnline, currentRide, audio]);
 
   // 2. Depois definir fetchAvailableRide que usa playNotification
   const fetchAvailableRide = useCallback(async () => {
@@ -483,156 +572,16 @@ export default function DriverDashboard() {
     setInitialAvailability();
   }, []);
 
-  // 1. Primeiro definir stopPolling
-  const stopPolling = useCallback(() => {
-    if (pollingIntervalRef.current) {
-      console.log('Parando polling');
-      clearInterval(pollingIntervalRef.current);
-      pollingIntervalRef.current = null;
-      setAvailableRides([]); // Limpa qualquer corrida disponível ao parar
-    }
-  }, []);
-
-  // 2. Depois definir startPolling que usa stopPolling
-  const startPolling = useCallback(() => {
-    if (pollingIntervalRef.current) {
-      clearInterval(pollingIntervalRef.current);
-    }
-
-    console.log('Iniciando polling de corridas...');
-    pollingIntervalRef.current = setInterval(async () => {
-      try {
-        // Só faz polling se estiver online e sem corrida atual
-        if (!isOnline || currentRide) {
-          console.log('Parando polling:', { isOnline, hasCurrent: !!currentRide });
-          stopPolling();
-          return;
-        }
-
-        const response = await api.get('/rides/available');
-        if (response.data.length > 0) {
-          setAvailableRides(response.data);
-          playNotification();
-        } else {
-          setAvailableRides([]);
-        }
-      } catch (error) {
-        console.error('Erro no polling:', error);
-      }
-    }, 5000);
-  }, [isOnline, currentRide, playNotification, stopPolling]);
-
-  // 3. Depois o useEffect que usa ambas as funções
-  useEffect(() => {
-    const loadCurrentRide = async () => {
-      try {
-        const response = await api.get('/rides/current');
-        if (response.data) {
-          const currentRide = response.data;
-          setCurrentRide(currentRide);
-          stopPolling(); // Para o polling se tiver corrida atual
-
-          const rideData = processRideData(currentRide);
-          if (rideData) {
-            await updateMapRoute(rideData);
-          }
-        } else {
-          // Se não tem corrida atual e está online, inicia o polling
-          if (isOnline) {
-            startPolling();
-          }
-        }
-      } catch (error) {
-        console.error('Erro ao carregar corrida atual:', error);
-        setError('Erro ao carregar corrida atual');
-      }
-    };
-
-    if (isOnline) {
-      loadCurrentRide();
-    } else {
-      stopPolling(); // Para o polling se ficar offline
-    }
-
-    // Cleanup quando o componente desmontar
-    return () => {
-      stopPolling();
-    };
-  }, [isOnline, processRideData, updateMapRoute, startPolling, stopPolling]);
-
-  // Adicionar detector de interação do usuário
-  useEffect(() => {
-    const handleInteraction = () => {
-      document.documentElement.setAttribute('data-user-interacted', 'true');
-      // Pré-carrega o áudio após interação
-      if (audio) {
-        audio.load();
-      }
-    };
-
-    document.addEventListener('click', handleInteraction);
-    document.addEventListener('touchstart', handleInteraction);
-
-    return () => {
-      document.removeEventListener('click', handleInteraction);
-      document.removeEventListener('touchstart', handleInteraction);
-    };
-  }, []);
-
-  // Verifica o status inicial e configura o polling
-  useEffect(() => {
-    let isMounted = true;
-
-    const checkInitialStatus = async () => {
-      try {
-        const response = await api.get('/users/me');
-        const isAvailable = response.data.isAvailable || false;
-        
-        if (isMounted) {
-          setIsOnline(isAvailable);
-          if (isAvailable) {
-            startPolling();
-          }
-        }
-      } catch (error) {
-        console.error('Erro ao verificar status inicial:', error);
-      }
-    };
-
-    checkInitialStatus();
-
-    return () => {
-      isMounted = false;
-      stopPolling();
-    };
-  }, [startPolling, stopPolling]);
-
-  // Atualiza o polling quando o status online muda
-  useEffect(() => {
-    if (isOnline && !currentRide) {
-      startPolling();
-    } else {
-      stopPolling();
-    }
-  }, [isOnline, currentRide, startPolling, stopPolling]);
-
   // Atualizar a função handleAcceptRide
   const handleAcceptRide = async (rideId) => {
     try {
-      const shouldAccept = window.confirm('Deseja aceitar esta corrida?');
-      if (!shouldAccept) return;
-
       setLoading(true);
-      const acceptedRide = await rideService.acceptRide(rideId);
-      setCurrentRide(acceptedRide);
-      setAvailableRides([]);
+      const updatedRide = await rideService.acceptRide(rideId);
+      setCurrentRide(updatedRide);
       
-      // Parar o polling quando aceitar uma corrida
-      setLastRideCount(0);
-      
-      // Calcular rota
-      if (acceptedRide.origin?.coordinates) {
-        calculateRoute(acceptedRide.origin.coordinates);
+      // Calcular rota após aceitar
+      if (updatedRide.origin?.coordinates) {
+        calculateRoute(updatedRide.origin.coordinates);
       }
     } catch (error) {
       console.error('Erro ao aceitar corrida:', error);
@@ -673,17 +622,11 @@ export default function DriverDashboard() {
         setError('');
       }, 3000);
 
-      setTimeout(() => {
-        if (isOnline) {
-          startPolling();
-        }
-      }, 1000);
-
     } catch (error) {
       console.error('Erro ao finalizar corrida:', error);
       setError(error?.response?.data?.message || 'Erro ao finalizar corrida');
     }
-  }, [currentRide, directionsRenderer, isOnline, startPolling]);
+  }, [currentRide, directionsRenderer]);
 
   // Usar as funções em algum lugar do código
   useEffect(() => {
@@ -698,66 +641,8 @@ export default function DriverDashboard() {
     };
   }, [clearMapRoute]);
 
-  // Atualizar a função de buscar corridas
-  const fetchAvailableRides = useCallback(async () => {
-    if (!isOnline) return;
-
-    try {
-      console.log('Buscando corridas disponíveis...');
-      const rides = await rideService.getAvailableRides();
-      
-      if (rides.length > lastRideCount) {
-        console.log('Nova corrida encontrada, tocando notificação');
-        if (!audioPermission && showAudioPrompt) {
-          // Se não tiver permissão, mostra o prompt
-          setShowAudioPrompt(true);
-        } else if (audioPermission) {
-          // Se tiver permissão, toca a notificação
-          playNotification();
-        }
-      }
-      
-      setLastRideCount(rides.length);
-      setAvailableRides(rides);
-      setError('');
-    } catch (error) {
-      console.error('Erro ao buscar corridas:', error);
-      if (!error.message.includes('timeout')) {
-        setError('Erro ao buscar corridas disponíveis');
-      }
-    }
-  }, [isOnline, lastRideCount, playNotification, audioPermission, showAudioPrompt]);
-
-  // Atualizar o polling para ser mais resiliente
-  useEffect(() => {
-    let intervalId;
-    let retryTimeout;
-
-    const startPolling = () => {
-      if (!isOnline || currentRide) return;
-
-      fetchAvailableRides();
-      intervalId = setInterval(fetchAvailableRides, 15000);
-    };
-
-    const handleError = () => {
-      if (intervalId) {
-        clearInterval(intervalId);
-      }
-      // Tentar novamente em 5 segundos
-      retryTimeout = setTimeout(startPolling, 5000);
-    };
-
-    startPolling();
-
-    return () => {
-      if (intervalId) clearInterval(intervalId);
-      if (retryTimeout) clearTimeout(retryTimeout);
-    };
-  }, [fetchAvailableRides, isOnline, currentRide]);
-
-  // Atualizar status da corrida
-  const updateRideStatus = async (rideId, status) => {
+  // Adicionar função updateRideStatus
+  const updateRideStatus = useCallback(async (rideId, status) => {
     try {
       let updatedRide;
       switch (status) {
@@ -778,11 +663,11 @@ export default function DriverDashboard() {
       setError(`Erro ao atualizar status para ${status}`);
       console.error(error);
     }
-  };
+  }, []);
 
-  // Componente de prompt de áudio
+  // Atualizar o componente AudioPermissionPrompt
   const AudioPermissionPrompt = () => {
-    if (!showAudioPrompt) return null;
+    if (!showAudioPrompt || audioPermission) return null;
 
     return (
       <div className="fixed bottom-20 left-0 right-0 mx-4 bg-white rounded-lg shadow-lg p-4 border border-gray-200 z-50">
@@ -798,14 +683,18 @@ export default function DriverDashboard() {
           </div>
           <div className="flex space-x-2">
             <button
-              onClick={() => setShowAudioPrompt(false)}
+              onClick={() => {
+                setShowAudioPrompt(false);
+                setError('Você pode ativar as notificações depois nas configurações');
+                setTimeout(() => setError(''), 3000);
+              }}
               className="px-3 py-1 text-sm text-gray-600 hover:text-gray-800"
             >
               Depois
             </button>
             <button
               onClick={requestAudioPermission}
-              className="px-4 py-1 bg-blue-500 text-white rounded-md text-sm hover:bg-blue-600"
+              className="px-4 py-2 bg-blue-500 text-white rounded-md text-sm hover:bg-blue-600 transition-colors duration-200"
             >
               Ativar
             </button>

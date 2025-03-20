@@ -25,4 +25,8 @@ yarn-error.log*
 !src/assets/
 !src/assets/images/
 !src/assets/images/*.png
-!public/*.png 
+!public/*.png
+
+# Não ignorar sons
+!public/sounds/
+!public/sounds/*.mp3 

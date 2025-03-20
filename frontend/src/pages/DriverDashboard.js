@@ -43,22 +43,56 @@ export default function DriverDashboard() {
   // Refs
   const mapRef = useRef(null);
   const pollingIntervalRef = useRef(null);
-  const audioRef = useRef(new Audio('/notification.mp3'));
+  const [audio] = useState(new Audio('/sounds/notification.mp3'));
   const [lastRideCount, setLastRideCount] = useState(0);
 
-  // 1. Primeiro definir playNotification
+  // Simplificar a função de notificação
   const playNotification = useCallback(() => {
-    if (!audioRef.current || !isOnline) return;
-
     try {
-      audioRef.current.currentTime = 0;
-      audioRef.current.play().catch(error => {
-        console.error('Erro ao tocar áudio:', error);
-      });
+      // Reseta o áudio para o início
+      audio.currentTime = 0;
+      
+      // Tenta tocar o som
+      const playPromise = audio.play();
+      
+      if (playPromise !== undefined) {
+        playPromise.catch((error) => {
+          console.error('Erro ao tocar áudio:', error);
+          // Se falhar, tenta tocar após interação do usuário
+          const handleUserInteraction = () => {
+            audio.play();
+            document.removeEventListener('click', handleUserInteraction);
+            document.removeEventListener('touchstart', handleUserInteraction);
+          };
+          document.addEventListener('click', handleUserInteraction);
+          document.addEventListener('touchstart', handleUserInteraction);
+        });
+      }
     } catch (error) {
-      console.error('Erro ao manipular áudio:', error);
+      console.error('Erro ao tocar notificação:', error);
     }
-  }, [isOnline]);
+  }, [audio]);
+
+  // Configurar o áudio quando o componente montar
+  useEffect(() => {
+    audio.preload = 'auto';
+    audio.volume = 1.0;
+    
+    // Tenta pré-carregar o áudio
+    const loadAudio = () => {
+      const loadPromise = audio.load();
+      if (loadPromise !== undefined) {
+        loadPromise.catch(error => {
+          console.error('Erro ao carregar áudio:', error);
+        });
+      }
+    };
+    loadAudio();
+
+    return () => {
+      audio.pause();
+    };
+  }, [audio]);
 
   // 2. Depois definir fetchAvailableRide que usa playNotification
   const fetchAvailableRide = useCallback(async () => {
@@ -79,19 +113,6 @@ export default function DriverDashboard() {
     () => debounce(() => fetchAvailableRide(), 1000),
     [fetchAvailableRide]
   );
-
-  // Inicializa o áudio
-  useEffect(() => {
-    audioRef.current.preload = 'auto';
-    audioRef.current.volume = 1.0;
-
-    return () => {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current = null;
-      }
-    };
-  }, []);
 
   const clearMapRoute = useCallback(() => {
     if (directionsRenderer) {
@@ -326,8 +347,8 @@ export default function DriverDashboard() {
     const handleInteraction = () => {
       document.documentElement.setAttribute('data-user-interacted', 'true');
       // Pré-carrega o áudio após interação
-      if (audioRef.current) {
-        audioRef.current.load();
+      if (audio) {
+        audio.load();
       }
     };
 
@@ -461,18 +482,19 @@ export default function DriverDashboard() {
 
   // Atualizar a função de buscar corridas
   const fetchAvailableRides = useCallback(async () => {
-    if (!isOnline) return; // Não buscar se estiver offline
+    if (!isOnline) return;
 
     try {
       console.log('Buscando corridas disponíveis...');
       const rides = await rideService.getAvailableRides();
       
-      // Verificar se há novas corridas e tocar notificação
+      // Tocar notificação se houver novas corridas
       if (rides.length > lastRideCount) {
-        audioRef.current.play().catch(err => console.log('Erro ao tocar áudio:', err));
+        console.log('Nova corrida encontrada, tocando notificação');
+        playNotification();
       }
-      setLastRideCount(rides.length);
       
+      setLastRideCount(rides.length);
       setAvailableRides(rides);
       setError('');
     } catch (error) {
@@ -480,7 +502,7 @@ export default function DriverDashboard() {
       setError('Erro ao buscar corridas disponíveis');
       setAvailableRides([]);
     }
-  }, [isOnline, lastRideCount]);
+  }, [isOnline, lastRideCount, playNotification]);
 
   // Atualizar o useEffect para polling com intervalo maior
   useEffect(() => {

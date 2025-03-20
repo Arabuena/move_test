@@ -7,6 +7,7 @@ import HomePage from './pages/HomePage';
 import RequestRide from './pages/RequestRide';
 import DriverDashboard from './pages/DriverDashboard';
 import AdminDashboard from './pages/AdminDashboard';
+import RegisterPage from './pages/RegisterPage';
 
 // Componente para redirecionar usuários logados
 const PublicRoute = ({ children }) => {
@@ -67,6 +68,14 @@ export default function AppRoutes() {
         element={
           <PublicRoute>
             <LoginPage />
+          </PublicRoute>
+        } 
+      />
+      <Route 
+        path="/register" 
+        element={
+          <PublicRoute>
+            <RegisterPage />
           </PublicRoute>
         } 
       />

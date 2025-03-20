@@ -3,7 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import logo from '../assets/images/logo.png';
 
-export default function RegisterPage() {
+export default function DriverRegisterPage() {
   const navigate = useNavigate();
   const { register } = useAuth();
   const [formData, setFormData] = useState({
@@ -11,11 +11,15 @@ export default function RegisterPage() {
     email: '',
     password: '',
     confirmPassword: '',
-    phone: ''
+    phone: '',
+    carModel: '',
+    licensePlate: '',
+    carYear: '',
+    carColor: ''
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [status, setStatus] = useState('idle'); // 'idle' | 'submitting' | 'success' | 'error'
+  const [status, setStatus] = useState('idle');
 
   const validateForm = () => {
     const errors = [];
@@ -44,6 +48,22 @@ export default function RegisterPage() {
       errors.push('Telefone é obrigatório');
     }
 
+    if (!formData.carModel.trim()) {
+      errors.push('Modelo do carro é obrigatório');
+    }
+
+    if (!formData.licensePlate.trim()) {
+      errors.push('Placa do veículo é obrigatória');
+    }
+
+    if (!formData.carYear.trim()) {
+      errors.push('Ano do veículo é obrigatório');
+    }
+
+    if (!formData.carColor.trim()) {
+      errors.push('Cor do veículo é obrigatória');
+    }
+
     if (errors.length > 0) {
       setError(errors.join('. '));
       return false;
@@ -66,15 +86,13 @@ export default function RegisterPage() {
 
     try {
       await register({
-        name: formData.name,
-        email: formData.email,
-        password: formData.password,
-        phone: formData.phone
+        ...formData,
+        role: 'driver'
       });
 
       setStatus('success');
       setTimeout(() => {
-        navigate('/request-ride', { replace: true });
+        navigate('/driver-dashboard', { replace: true });
       }, 1500);
     } catch (error) {
       setError(error.message);
@@ -94,8 +112,11 @@ export default function RegisterPage() {
             className="mx-auto h-12 w-auto"
           />
           <h2 className="mt-4 text-center text-3xl font-extrabold text-purple-900">
-            Crie sua conta
+            Cadastro de Motorista
           </h2>
+          <p className="mt-2 text-center text-sm text-gray-600">
+            Junte-se à nossa equipe de motoristas
+          </p>
         </div>
 
         {error && (
@@ -113,23 +134,9 @@ export default function RegisterPage() {
           </div>
         )}
 
-        {status === 'success' && (
-          <div className="bg-green-50 border-l-4 border-green-400 p-4 rounded-md">
-            <div className="flex">
-              <div className="flex-shrink-0">
-                <svg className="h-5 w-5 text-green-400" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                </svg>
-              </div>
-              <div className="ml-3">
-                <p className="text-sm text-green-700">Registro realizado com sucesso! Redirecionando...</p>
-              </div>
-            </div>
-          </div>
-        )}
-
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           <div className="space-y-4">
+            {/* Dados Pessoais */}
             <div>
               <label htmlFor="name" className="block text-sm font-medium text-gray-700">
                 Nome completo
@@ -147,7 +154,7 @@ export default function RegisterPage() {
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
               />
             </div>
-            
+
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-gray-700">
                 Email
@@ -163,6 +170,24 @@ export default function RegisterPage() {
                 placeholder="seu@email.com"
                 value={formData.email}
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+              />
+            </div>
+
+            <div>
+              <label htmlFor="phone" className="block text-sm font-medium text-gray-700">
+                Telefone
+              </label>
+              <input
+                id="phone"
+                name="phone"
+                type="tel"
+                required
+                className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 
+                focus:outline-none focus:ring-purple-500 focus:border-purple-500 
+                sm:text-sm transition duration-200"
+                placeholder="(00) 00000-0000"
+                value={formData.phone}
+                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
               />
             </div>
 
@@ -202,26 +227,85 @@ export default function RegisterPage() {
               />
             </div>
 
-            <div>
-              <label htmlFor="phone" className="block text-sm font-medium text-gray-700">
-                Telefone
-              </label>
-              <input
-                id="phone"
-                name="phone"
-                type="tel"
-                required
-                className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 
-                focus:outline-none focus:ring-purple-500 focus:border-purple-500 
-                sm:text-sm transition duration-200"
-                placeholder="(00) 00000-0000"
-                value={formData.phone}
-                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-              />
-            </div>
-          </div>
+            {/* Dados do Veículo */}
+            <div className="pt-4">
+              <h3 className="text-lg font-medium text-gray-900 mb-4">Dados do Veículo</h3>
+              
+              <div className="space-y-4">
+                <div>
+                  <label htmlFor="carModel" className="block text-sm font-medium text-gray-700">
+                    Modelo do Carro
+                  </label>
+                  <input
+                    id="carModel"
+                    name="carModel"
+                    type="text"
+                    required
+                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 
+                    focus:outline-none focus:ring-purple-500 focus:border-purple-500 
+                    sm:text-sm transition duration-200"
+                    placeholder="Ex: Fiat Uno 2020"
+                    value={formData.carModel}
+                    onChange={(e) => setFormData({ ...formData, carModel: e.target.value })}
+                  />
+                </div>
 
-          <div>
+                <div>
+                  <label htmlFor="carYear" className="block text-sm font-medium text-gray-700">
+                    Ano do Veículo
+                  </label>
+                  <input
+                    id="carYear"
+                    name="carYear"
+                    type="text"
+                    required
+                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 
+                    focus:outline-none focus:ring-purple-500 focus:border-purple-500 
+                    sm:text-sm transition duration-200"
+                    placeholder="Ex: 2020"
+                    value={formData.carYear}
+                    onChange={(e) => setFormData({ ...formData, carYear: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="carColor" className="block text-sm font-medium text-gray-700">
+                    Cor do Veículo
+                  </label>
+                  <input
+                    id="carColor"
+                    name="carColor"
+                    type="text"
+                    required
+                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 
+                    focus:outline-none focus:ring-purple-500 focus:border-purple-500 
+                    sm:text-sm transition duration-200"
+                    placeholder="Ex: Prata"
+                    value={formData.carColor}
+                    onChange={(e) => setFormData({ ...formData, carColor: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="licensePlate" className="block text-sm font-medium text-gray-700">
+                    Placa do Veículo
+                  </label>
+                  <input
+                    id="licensePlate"
+                    name="licensePlate"
+                    type="text"
+                    required
+                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 
+                    focus:outline-none focus:ring-purple-500 focus:border-purple-500 
+                    sm:text-sm transition duration-200"
+                    placeholder="Ex: ABC1234"
+                    value={formData.licensePlate}
+                    onChange={(e) => setFormData({ ...formData, licensePlate: e.target.value })}
+                  />
+                </div>
+              </div>
+            </div>
+
             <button
               type="submit"
               disabled={loading}
@@ -229,29 +313,19 @@ export default function RegisterPage() {
                 ${loading ? 'bg-purple-400' : 'bg-purple-600 hover:bg-purple-700'} 
                 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 transition duration-200`}
             >
-              {loading ? 'Registrando...' : 'Criar conta'}
+              {loading ? 'Registrando...' : 'Cadastrar como Motorista'}
             </button>
           </div>
         </form>
 
-        <div className="mt-4 text-center space-y-2">
+        <div className="mt-4 text-center">
           <p className="text-sm text-gray-600">
             Já tem uma conta?{' '}
             <Link 
-              to="/login"
+              to="/login" 
               className="font-medium text-purple-600 hover:text-purple-500"
             >
               Faça login
-            </Link>
-          </p>
-          <p className="text-sm text-gray-600">
-            Quer trabalhar conosco?{' '}
-            <Link 
-              to="/driver-register"
-              className="font-medium text-purple-600 hover:text-purple-500"
-              state={{ fromRegister: true }}
-            >
-              Cadastre-se como motorista
             </Link>
           </p>
         </div>

@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { register } from '../services/auth';
+import { useAuth } from '../contexts/AuthContext';
+import logo from '../assets/images/logo.png';
 
 export default function DriverRegister() {
   const navigate = useNavigate();

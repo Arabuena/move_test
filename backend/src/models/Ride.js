@@ -44,8 +44,31 @@ const rideSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['pending', 'accepted', 'in_progress', 'completed', 'cancelled'],
+    enum: ['pending', 'accepted', 'driver_arrived', 'in_progress', 'completed', 'cancelled'],
     default: 'pending'
+  },
+  paymentStatus: {
+    type: String,
+    enum: ['pending', 'processing', 'completed', 'failed'],
+    default: 'pending'
+  },
+  paymentMethod: {
+    type: String,
+    enum: ['cash', 'credit_card', 'pix'],
+    default: 'cash'
+  },
+  startTime: Date,
+  endTime: Date,
+  cancelReason: String,
+  rating: {
+    passenger: {
+      score: Number,
+      comment: String
+    },
+    driver: {
+      score: Number,
+      comment: String
+    }
   },
   createdAt: {
     type: Date,

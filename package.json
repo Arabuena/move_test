@@ -1,0 +1,19 @@
+{
+  "name": "leva-app",
+  "version": "1.0.0",
+  "description": "Aplicativo de transporte estilo Uber",
+  "main": "backend/server.js",
+  "scripts": {
+    "start": "cd backend && node server.js",
+    "build": "cd frontend && npm install && npm run build && cd ../backend && npm install",
+    "dev": "concurrently \"cd backend && npm run dev\" \"cd frontend && npm start\"",
+    "install-deps": "npm install && cd frontend && npm install && cd ../backend && npm install"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "dependencies": {
+    "@react-google-maps/api": "^2.20.6",
+    "concurrently": "^8.2.2"
+  }
+}

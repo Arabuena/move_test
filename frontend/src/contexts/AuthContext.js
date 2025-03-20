@@ -105,13 +105,12 @@ export function AuthProvider({ children }) {
         email: userData.email.toLowerCase().trim(),
         password: userData.password,
         phone: userData.phone?.trim() || '',
-        role: 'user'
+        role: 'passenger'
       };
 
-      console.log('Enviando dados para API:', data);
+      console.log('Enviando dados para registro:', data);
 
       const response = await api.post('/auth/register', data);
-
       console.log('Resposta do registro:', response.data);
 
       if (!response.data || response.data.error) {
@@ -128,13 +127,8 @@ export function AuthProvider({ children }) {
 
       return { user, token };
     } catch (error) {
-      console.error('Erro detalhado no registro:', {
-        message: error.message,
-        response: error.response?.data,
-        status: error.response?.status
-      });
-
-      throw new Error(error.response?.data?.message || 'Não foi possível completar o registro. Tente novamente.');
+      console.error('Erro no registro:', error);
+      throw error;
     }
   };
 

@@ -76,5 +76,22 @@ export const rideService = {
       console.error('Erro ao avaliar corrida:', error);
       throw error;
     }
+  },
+
+  // Listar corridas disponíveis (motorista)
+  getAvailableRides: async () => {
+    try {
+      console.log('Fazendo requisição para /rides/available');
+      const response = await api.get('/rides/available');
+      console.log('Resposta recebida:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('Erro detalhado:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status
+      });
+      throw error;
+    }
   }
 }; 

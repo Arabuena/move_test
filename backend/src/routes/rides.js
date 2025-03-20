@@ -198,4 +198,35 @@ router.post('/:id/rate', auth, async (req, res) => {
   }
 });
 
+// Listar corridas disponíveis para motoristas
+router.get('/available', auth, async (req, res) => {
+  try {
+    console.log('Requisição recebida em /rides/available');
+    console.log('Usuário:', {
+      id: req.user._id,
+      role: req.user.role,
+      isAvailable: req.user.isAvailable
+    });
+
+    if (req.user.role !== 'driver') {
+      console.log('Acesso negado - usuário não é motorista');
+      return res.status(403).json({ error: 'Acesso permitido apenas para motoristas' });
+    }
+
+    // Buscar corridas pendentes
+    const availableRides = await Ride.find({ 
+      status: 'pending',
+      driver: null
+    }).populate('passenger', 'name phone');
+
+    console.log(`Encontradas ${availableRides.length} corridas disponíveis`);
+    console.log('Corridas:', availableRides);
+
+    res.json(availableRides);
+  } catch (error) {
+    console.error('Erro ao buscar corridas:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 module.exports = router; 

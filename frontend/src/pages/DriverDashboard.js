@@ -3,6 +3,7 @@ import api from '../services/api';
 import { GoogleMap, DirectionsRenderer, Marker } from '@react-google-maps/api';
 import RideStatus from '../components/RideStatus';
 import RideChat from '../components/RideChat';
+import { rideService } from '../services/rideService';
 
 const mapContainerStyle = {
   width: '100%',
@@ -380,16 +381,12 @@ export default function DriverDashboard() {
   // Atualizar a função handleAcceptRide
   const handleAcceptRide = async (rideId) => {
     try {
-      setLoading(true);
-      const response = await api.post(`/rides/accept/${rideId}`);
-      setCurrentRide(response.data);
-      setAvailableRides([]);
-      stopPolling();
+      const acceptedRide = await rideService.acceptRide(rideId);
+      setCurrentRide(acceptedRide);
+      setAvailableRides(rides => rides.filter(ride => ride._id !== rideId));
     } catch (error) {
       console.error('Erro ao aceitar corrida:', error);
       setError('Erro ao aceitar corrida');
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -448,6 +445,61 @@ export default function DriverDashboard() {
       clearMapRoute();
     };
   }, [clearMapRoute]);
+
+  // Atualizar a função de buscar corridas
+  const fetchAvailableRides = useCallback(async () => {
+    try {
+      console.log('Buscando corridas disponíveis...');
+      const rides = await rideService.getAvailableRides();
+      console.log('Corridas recebidas:', rides);
+      setAvailableRides(rides);
+      setError('');
+    } catch (error) {
+      console.error('Erro ao buscar corridas:', error);
+      setError('Erro ao buscar corridas disponíveis');
+      setAvailableRides([]);
+    }
+  }, []);
+
+  // Atualizar o useEffect para polling
+  useEffect(() => {
+    console.log('Iniciando polling de corridas...');
+    fetchAvailableRides(); // Busca inicial
+
+    const interval = setInterval(() => {
+      console.log('Executando polling...');
+      fetchAvailableRides();
+    }, 5000); // Reduzido para 5 segundos para teste
+
+    return () => {
+      console.log('Limpando intervalo de polling');
+      clearInterval(interval);
+    };
+  }, [fetchAvailableRides]);
+
+  // Atualizar status da corrida
+  const updateRideStatus = async (rideId, status) => {
+    try {
+      let updatedRide;
+      switch (status) {
+        case 'arrived':
+          updatedRide = await rideService.driverArrived(rideId);
+          break;
+        case 'start':
+          updatedRide = await rideService.startRide(rideId);
+          break;
+        case 'complete':
+          updatedRide = await rideService.completeRide(rideId);
+          break;
+        default:
+          return;
+      }
+      setCurrentRide(updatedRide);
+    } catch (error) {
+      setError(`Erro ao atualizar status para ${status}`);
+      console.error(error);
+    }
+  };
 
   if (loading) {
     return (
@@ -529,8 +581,17 @@ export default function DriverDashboard() {
                 <div className="flex space-x-4">
                   {currentRide.status === 'accepted' && (
                     <button
-                      onClick={handleStartRide}
-                      className="flex-1 bg-green-600 text-white py-2 px-4 rounded hover:bg-green-700"
+                      onClick={() => updateRideStatus(currentRide._id, 'arrived')}
+                      className="bg-green-500 text-white px-4 py-2 rounded"
+                    >
+                      Cheguei ao Local
+                    </button>
+                  )}
+                  
+                  {currentRide.status === 'driver_arrived' && (
+                    <button
+                      onClick={() => updateRideStatus(currentRide._id, 'start')}
+                      className="bg-blue-500 text-white px-4 py-2 rounded"
                     >
                       Iniciar Corrida
                     </button>
@@ -538,8 +599,8 @@ export default function DriverDashboard() {
                   
                   {currentRide.status === 'in_progress' && (
                     <button
-                      onClick={handleCompleteRide}
-                      className="flex-1 bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700"
+                      onClick={() => updateRideStatus(currentRide._id, 'complete')}
+                      className="bg-purple-500 text-white px-4 py-2 rounded"
                     >
                       Finalizar Corrida
                     </button>

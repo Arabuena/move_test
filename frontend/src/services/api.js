@@ -13,51 +13,38 @@ const api = axios.create({
 // Adiciona o token em todas as requisições
 api.interceptors.request.use(config => {
   const token = localStorage.getItem('token');
-  const user = JSON.parse(localStorage.getItem('user'));
+  console.log('Token nas requisições:', token ? 'Presente' : 'Ausente');
+  
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
   
   console.log('Configuração da requisição:', {
     url: config.url,
     method: config.method,
-    token: token ? 'Bearer ' + token : 'No token',
-    userRole: user?.role
+    headers: config.headers
   });
 
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
   return config;
 });
 
 // Interceptor para respostas
 api.interceptors.response.use(
   response => {
-    // Log da resposta bem-sucedida
     console.log('Resposta recebida:', {
+      url: response.config.url,
       status: response.status,
-      data: response.data,
-      headers: response.headers,
-      timestamp: new Date().toISOString()
+      data: response.data
     });
     return response;
   },
   error => {
-    // Log detalhado do erro
-    const errorDetails = {
-      message: error.message,
-      code: error.code,
+    console.error('Erro na requisição:', {
+      url: error.config?.url,
       status: error.response?.status,
-      statusText: error.response?.statusText,
       data: error.response?.data,
-      request: {
-        method: error.config?.method,
-        url: error.config?.url,
-        data: error.config?.data,
-        headers: error.config?.headers
-      },
-      timestamp: new Date().toISOString()
-    };
-
-    console.error('Erro na API:', errorDetails);
+      message: error.message
+    });
     return Promise.reject(error);
   }
 );

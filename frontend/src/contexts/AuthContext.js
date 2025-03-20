@@ -100,15 +100,16 @@ export function AuthProvider({ children }) {
     try {
       console.log('Iniciando registro com dados:', userData);
 
+      // Garantindo que o role seja definido corretamente
       const data = {
         name: userData.name.trim(),
         email: userData.email.toLowerCase().trim(),
         password: userData.password,
         phone: userData.phone?.trim() || '',
-        role: 'passenger'
+        role: userData.role || 'passenger' // Usando o role fornecido ou 'passenger' como padrão
       };
 
-      console.log('Enviando dados para registro:', data);
+      console.log('Dados formatados para registro:', data);
 
       const response = await api.post('/auth/register', data);
       console.log('Resposta do registro:', response.data);
@@ -118,6 +119,12 @@ export function AuthProvider({ children }) {
       }
 
       const { token, user } = response.data;
+
+      // Verificando se o usuário tem o role correto
+      console.log('Usuário criado:', user);
+      if (!user.role) {
+        console.error('Usuário criado sem role!');
+      }
 
       // Salva os dados
       localStorage.setItem('token', token);

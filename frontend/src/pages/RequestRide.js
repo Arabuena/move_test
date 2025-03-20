@@ -177,6 +177,12 @@ export default function RequestRide() {
 
   const handleRequestRide = async (e) => {
     e.preventDefault();
+    
+    if (!origin || !destination) {
+      setError('Selecione origem e destino');
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
@@ -184,10 +190,24 @@ export default function RequestRide() {
       console.log('Token:', localStorage.getItem('token'));
       console.log('Usuário:', localStorage.getItem('user'));
       
-      const response = await api.post('/rides', {
-        origin: origin,
-        destination: destination
-      });
+      // Formatando os dados corretamente
+      const rideData = {
+        origin: {
+          coordinates: [origin.lng, origin.lat],
+          address: origin.formatted_address || origin.name
+        },
+        destination: {
+          coordinates: [destination.lng, destination.lat],
+          address: destination.formatted_address || destination.name
+        },
+        distance,
+        duration,
+        price
+      };
+
+      console.log('Enviando dados da corrida:', rideData);
+
+      const response = await api.post('/rides', rideData);
 
       console.log('Resposta da criação de corrida:', response.data);
       // Redireciona para a página de acompanhamento
@@ -198,7 +218,7 @@ export default function RequestRide() {
         response: error.response?.data,
         status: error.response?.status
       });
-      setError(error.message);
+      setError(error.response?.data?.error || 'Erro ao solicitar corrida');
     } finally {
       setLoading(false);
     }

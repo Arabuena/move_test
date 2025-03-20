@@ -9,30 +9,23 @@ const api = axios.create({
   }
 });
 
-// Interceptor para requisições
-api.interceptors.request.use(
-  config => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
+// Adiciona o token em todas as requisições
+api.interceptors.request.use(config => {
+  const token = localStorage.getItem('token');
+  const user = JSON.parse(localStorage.getItem('user'));
+  
+  console.log('Configuração da requisição:', {
+    url: config.url,
+    method: config.method,
+    token: token ? 'Bearer ' + token : 'No token',
+    userRole: user?.role
+  });
 
-    // Log completo da requisição
-    console.log('Enviando requisição:', {
-      method: config.method?.toUpperCase(),
-      url: `${config.baseURL}${config.url}`,
-      headers: config.headers,
-      data: config.data,
-      timestamp: new Date().toISOString()
-    });
-
-    return config;
-  },
-  error => {
-    console.error('Erro na configuração:', error);
-    return Promise.reject(error);
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
   }
-);
+  return config;
+});
 
 // Interceptor para respostas
 api.interceptors.response.use(
@@ -63,7 +56,7 @@ api.interceptors.response.use(
       timestamp: new Date().toISOString()
     };
 
-    console.error('Erro na requisição:', errorDetails);
+    console.error('Erro na API:', errorDetails);
     return Promise.reject(error);
   }
 );

@@ -6,19 +6,51 @@ const Ride = require('../models/Ride');
 // Criar uma nova corrida
 router.post('/', auth, async (req, res) => {
   try {
-    console.log('Usuário autenticado:', req.user);
+    console.log('Dados recebidos:', req.body);
+    console.log('Usuário autenticado:', {
+      id: req.user._id,
+      email: req.user.email,
+      role: req.user.role
+    });
     
     // Verifica se o usuário é um passageiro
     if (req.user.role !== 'passenger') {
+      console.log('Acesso negado - Role incorreto:', req.user.role);
       return res.status(403).json({ 
-        error: 'Apenas passageiros podem solicitar corridas' 
+        error: 'Apenas passageiros podem solicitar corridas',
+        userRole: req.user.role,
+        requiredRole: 'passenger'
+      });
+    }
+
+    // Validação dos dados
+    const { origin, destination, distance, duration, price } = req.body;
+
+    if (!origin || !destination) {
+      return res.status(400).json({ 
+        error: 'Origem e destino são obrigatórios' 
+      });
+    }
+
+    if (!origin.coordinates || !destination.coordinates) {
+      return res.status(400).json({ 
+        error: 'Coordenadas de origem e destino são obrigatórias' 
       });
     }
 
     const ride = new Ride({
       passenger: req.user._id,
-      origin: req.body.origin,
-      destination: req.body.destination,
+      origin: {
+        coordinates: origin.coordinates,
+        address: origin.address
+      },
+      destination: {
+        coordinates: destination.coordinates,
+        address: destination.address
+      },
+      distance,
+      duration,
+      price,
       status: 'pending'
     });
 

@@ -28,6 +28,15 @@ const defaultCenter = {
   lng: -46.633308
 };
 
+// Constantes para geolocalização
+const GEO_CONFIG = {
+  enableHighAccuracy: true,
+  timeout: 20000,        // Aumentado para 20 segundos
+  maximumAge: 30000,     // Cache de 30 segundos
+  retryAttempts: 2,      // Número de tentativas
+  retryDelay: 3000       // Delay entre tentativas
+};
+
 export default function DriverDashboard() {
   // Estados
   const [currentRide, setCurrentRide] = useState(null);
@@ -39,6 +48,13 @@ export default function DriverDashboard() {
   const [isOnline, setIsOnline] = useState(false);
   const [directionsRenderer, setDirectionsRenderer] = useState(null);
   const [showChat, setShowChat] = useState(false);
+  const [locationError, setLocationError] = useState(null);
+  const [locationStatus, setLocationStatus] = useState('pending'); // 'pending' | 'granted' | 'denied'
+  const [audioPermission, setAudioPermission] = useState(false);
+  const [showAudioPrompt, setShowAudioPrompt] = useState(true);
+  const [geoRetryCount, setGeoRetryCount] = useState(0);
+  const lastLocationRef = useRef(null);
+  const geoErrorTimeoutRef = useRef(null);
 
   // Refs
   const mapRef = useRef(null);
@@ -46,32 +62,251 @@ export default function DriverDashboard() {
   const [audio] = useState(new Audio('/sounds/notification.mp3'));
   const [lastRideCount, setLastRideCount] = useState(0);
 
-  // Simplificar a função de notificação
-  const playNotification = useCallback(() => {
+  // 1. Primeiro definir calculateRoute
+  const calculateRoute = useCallback(async (destination) => {
+    if (!currentLocation || !destination) return;
+
     try {
-      // Reseta o áudio para o início
-      audio.currentTime = 0;
+      const directionsService = new window.google.maps.DirectionsService();
       
-      // Tenta tocar o som
+      const result = await directionsService.route({
+        origin: currentLocation,
+        destination: {
+          lat: destination[1],
+          lng: destination[0]
+        },
+        travelMode: window.google.maps.TravelMode.DRIVING
+      });
+
+      setDirections(result);
+
+      if (directionsRenderer) {
+        directionsRenderer.setDirections(result);
+      } else {
+        const renderer = new window.google.maps.DirectionsRenderer();
+        renderer.setMap(mapRef.current);
+        renderer.setDirections(result);
+        setDirectionsRenderer(renderer);
+      }
+    } catch (error) {
+      console.error('Erro ao calcular rota:', error);
+      setError('Não foi possível calcular a rota');
+    }
+  }, [currentLocation, directionsRenderer]);
+
+  // Função para obter localização com retry
+  const getCurrentPosition = useCallback(() => {
+    return new Promise((resolve, reject) => {
+      const tryGetPosition = (retries = GEO_CONFIG.retryAttempts) => {
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            lastLocationRef.current = {
+              lat: position.coords.latitude,
+              lng: position.coords.longitude
+            };
+            setGeoRetryCount(0);
+            resolve(position);
+          },
+          (error) => {
+            if (retries > 1) {
+              setTimeout(() => tryGetPosition(retries - 1), GEO_CONFIG.retryDelay);
+            } else {
+              // Se temos uma localização anterior, usamos ela
+              if (lastLocationRef.current) {
+                resolve({ coords: lastLocationRef.current });
+              } else {
+                reject(error);
+              }
+            }
+          },
+          GEO_CONFIG
+        );
+      };
+
+      tryGetPosition();
+    });
+  }, []);
+
+  // Atualizar requestLocationPermission
+  const requestLocationPermission = useCallback(async () => {
+    try {
+      setLocationStatus('pending');
+      
+      if (!navigator.geolocation) {
+        setLocationError('Seu dispositivo não suporta geolocalização');
+        setLocationStatus('denied');
+        return false;
+      }
+
+      if ('permissions' in navigator) {
+        const permission = await navigator.permissions.query({ name: 'geolocation' });
+        if (permission.state === 'denied') {
+          setLocationError('Permissão de localização negada. Por favor, habilite no seu navegador.');
+          setLocationStatus('denied');
+          return false;
+        }
+      }
+
+      try {
+        const position = await getCurrentPosition();
+        const newLocation = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude
+        };
+        
+        setCurrentLocation(newLocation);
+        setLocationStatus('granted');
+        setLocationError(null);
+        return true;
+      } catch (error) {
+        console.error('Erro ao obter localização:', error);
+        let errorMessage = 'Erro ao obter sua localização';
+        
+        switch (error.code) {
+          case error.PERMISSION_DENIED:
+            errorMessage = 'Permissão de localização negada';
+            setLocationStatus('denied');
+            break;
+          case error.POSITION_UNAVAILABLE:
+            errorMessage = 'Localização indisponível';
+            break;
+          case error.TIMEOUT:
+            errorMessage = 'Tempo excedido ao obter localização. Tentando novamente...';
+            // Tenta novamente após timeout
+            try {
+              const position = await getCurrentPosition();
+              const newLocation = {
+                lat: position.coords.latitude,
+                lng: position.coords.longitude
+              };
+              setCurrentLocation(newLocation);
+              setLocationStatus('granted');
+              setLocationError(null);
+              return true;
+            } catch (retryError) {
+              errorMessage = 'Não foi possível obter sua localização após várias tentativas';
+            }
+            break;
+          default:
+            errorMessage = 'Erro desconhecido ao obter localização';
+        }
+        
+        setLocationError(errorMessage);
+        return false;
+      }
+    } catch (error) {
+      console.error('Erro inesperado:', error);
+      setLocationError('Erro inesperado ao obter localização');
+      return false;
+    }
+  }, [getCurrentPosition]);
+
+  // Atualizar useEffect de localização
+  useEffect(() => {
+    let watchId = null;
+    let errorCount = 0;
+    const MAX_ERRORS = 5;
+    const ERROR_RESET_DELAY = 60000; // 1 minuto
+
+    const startLocationWatch = async () => {
+      try {
+        const hasPermission = await requestLocationPermission();
+        
+        if (hasPermission) {
+          watchId = navigator.geolocation.watchPosition(
+            (position) => {
+              const newLocation = {
+                lat: position.coords.latitude,
+                lng: position.coords.longitude
+              };
+              lastLocationRef.current = newLocation;
+              setCurrentLocation(newLocation);
+              setLocationError(null);
+              errorCount = 0; // Reset contador de erros
+              
+              if (currentRide?.origin?.coordinates) {
+                calculateRoute(currentRide.origin.coordinates);
+              }
+            },
+            (error) => {
+              errorCount++;
+              
+              // Só mostra erro após várias falhas
+              if (errorCount >= MAX_ERRORS) {
+                console.error('Múltiplos erros de localização:', error);
+                setLocationError('Problemas ao atualizar sua localização');
+                
+                // Tenta reiniciar o watch após muitos erros
+                if (watchId) {
+                  navigator.geolocation.clearWatch(watchId);
+                  // Usa última localização conhecida se disponível
+                  if (lastLocationRef.current) {
+                    setCurrentLocation(lastLocationRef.current);
+                  }
+                  // Agenda nova tentativa
+                  geoErrorTimeoutRef.current = setTimeout(() => {
+                    errorCount = 0;
+                    startLocationWatch();
+                  }, ERROR_RESET_DELAY);
+                }
+              }
+            },
+            GEO_CONFIG
+          );
+        }
+      } catch (error) {
+        console.error('Erro ao iniciar monitoramento:', error);
+      }
+    };
+
+    if (isOnline) {
+      startLocationWatch();
+    }
+
+    return () => {
+      if (watchId) {
+        navigator.geolocation.clearWatch(watchId);
+      }
+      if (geoErrorTimeoutRef.current) {
+        clearTimeout(geoErrorTimeoutRef.current);
+      }
+    };
+  }, [isOnline, currentRide, calculateRoute, requestLocationPermission]);
+
+  // Função para solicitar permissão de áudio
+  const requestAudioPermission = useCallback(() => {
+    setShowAudioPrompt(false);
+    setAudioPermission(true);
+    // Toca um som silencioso para garantir que futuras reproduções funcionem
+    const silentPlay = async () => {
+      try {
+        await audio.play();
+        audio.pause();
+        audio.currentTime = 0;
+      } catch (error) {
+        console.error('Erro ao inicializar áudio:', error);
+      }
+    };
+    silentPlay();
+  }, [audio]);
+
+  // Atualizar a função de notificação
+  const playNotification = useCallback(() => {
+    if (!audioPermission) return;
+
+    try {
+      audio.currentTime = 0;
       const playPromise = audio.play();
       
       if (playPromise !== undefined) {
         playPromise.catch((error) => {
           console.error('Erro ao tocar áudio:', error);
-          // Se falhar, tenta tocar após interação do usuário
-          const handleUserInteraction = () => {
-            audio.play();
-            document.removeEventListener('click', handleUserInteraction);
-            document.removeEventListener('touchstart', handleUserInteraction);
-          };
-          document.addEventListener('click', handleUserInteraction);
-          document.addEventListener('touchstart', handleUserInteraction);
         });
       }
     } catch (error) {
       console.error('Erro ao tocar notificação:', error);
     }
-  }, [audio]);
+  }, [audio, audioPermission]);
 
   // Configurar o áudio quando o componente montar
   useEffect(() => {
@@ -208,18 +443,29 @@ export default function DriverDashboard() {
     }
   }, [currentLocation, renderMarker]);
 
-  const updateLocation = useCallback(async (position) => {
-    try {
-      const coordinates = [position.coords.longitude, position.coords.latitude];
-      await api.patch('/users/location', { coordinates });
-      setCurrentLocation({
-        lat: position.coords.latitude,
-        lng: position.coords.longitude
-      });
-    } catch (error) {
-      console.error('Erro ao atualizar localização:', error);
-    }
-  }, []);
+  // Renderizar mensagem de erro de localização
+  const renderLocationError = () => {
+    if (!locationError) return null;
+
+    return (
+      <div className="fixed top-16 left-0 right-0 z-50 p-4">
+        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative">
+          <strong className="font-bold">Erro de localização: </strong>
+          <span className="block sm:inline">{locationError}</span>
+          {locationStatus === 'denied' && (
+            <div className="mt-2">
+              <button
+                onClick={requestLocationPermission}
+                className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600"
+              >
+                Tentar Novamente
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   // Adicione este useEffect no início do componente
   useEffect(() => {
@@ -236,34 +482,6 @@ export default function DriverDashboard() {
 
     setInitialAvailability();
   }, []);
-
-  // Modifique o useEffect de localização para incluir logs
-  useEffect(() => {
-    if (isOnline) {
-      console.log('Iniciando monitoramento de localização');
-      const watchId = navigator.geolocation.watchPosition(
-        (position) => {
-          const coordinates = [position.coords.longitude, position.coords.latitude];
-          console.log('Nova localização:', coordinates);
-          updateLocation(position);
-        },
-        (error) => {
-          console.error('Erro de geolocalização:', error);
-          setError('Erro ao obter localização');
-        },
-        { 
-          enableHighAccuracy: true,
-          timeout: 10000,
-          maximumAge: 0
-        }
-      );
-
-      return () => {
-        console.log('Parando monitoramento de localização');
-        navigator.geolocation.clearWatch(watchId);
-      };
-    }
-  }, [isOnline, updateLocation]);
 
   // 1. Primeiro definir stopPolling
   const stopPolling = useCallback(() => {
@@ -488,10 +706,15 @@ export default function DriverDashboard() {
       console.log('Buscando corridas disponíveis...');
       const rides = await rideService.getAvailableRides();
       
-      // Tocar notificação se houver novas corridas
       if (rides.length > lastRideCount) {
         console.log('Nova corrida encontrada, tocando notificação');
-        playNotification();
+        if (!audioPermission && showAudioPrompt) {
+          // Se não tiver permissão, mostra o prompt
+          setShowAudioPrompt(true);
+        } else if (audioPermission) {
+          // Se tiver permissão, toca a notificação
+          playNotification();
+        }
       }
       
       setLastRideCount(rides.length);
@@ -499,30 +722,37 @@ export default function DriverDashboard() {
       setError('');
     } catch (error) {
       console.error('Erro ao buscar corridas:', error);
-      setError('Erro ao buscar corridas disponíveis');
-      setAvailableRides([]);
+      if (!error.message.includes('timeout')) {
+        setError('Erro ao buscar corridas disponíveis');
+      }
     }
-  }, [isOnline, lastRideCount, playNotification]);
+  }, [isOnline, lastRideCount, playNotification, audioPermission, showAudioPrompt]);
 
-  // Atualizar o useEffect para polling com intervalo maior
+  // Atualizar o polling para ser mais resiliente
   useEffect(() => {
     let intervalId;
+    let retryTimeout;
 
-    if (isOnline && !currentRide) {
-      console.log('Iniciando polling de corridas...');
-      fetchAvailableRides(); // Busca inicial
+    const startPolling = () => {
+      if (!isOnline || currentRide) return;
 
-      intervalId = setInterval(() => {
-        console.log('Executando polling...');
-        fetchAvailableRides();
-      }, 15000); // Aumentado para 15 segundos
-    }
+      fetchAvailableRides();
+      intervalId = setInterval(fetchAvailableRides, 15000);
+    };
 
-    return () => {
+    const handleError = () => {
       if (intervalId) {
-        console.log('Limpando intervalo de polling');
         clearInterval(intervalId);
       }
+      // Tentar novamente em 5 segundos
+      retryTimeout = setTimeout(startPolling, 5000);
+    };
+
+    startPolling();
+
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+      if (retryTimeout) clearTimeout(retryTimeout);
     };
   }, [fetchAvailableRides, isOnline, currentRide]);
 
@@ -550,70 +780,40 @@ export default function DriverDashboard() {
     }
   };
 
-  // Adicionar função calculateRoute
-  const calculateRoute = useCallback(async (destination) => {
-    if (!currentLocation || !destination) return;
+  // Componente de prompt de áudio
+  const AudioPermissionPrompt = () => {
+    if (!showAudioPrompt) return null;
 
-    const directionsService = new window.google.maps.DirectionsService();
-
-    try {
-      const result = await directionsService.route({
-        origin: currentLocation,
-        destination: {
-          lat: destination[1],
-          lng: destination[0]
-        },
-        travelMode: window.google.maps.TravelMode.DRIVING
-      });
-
-      setDirections(result);
-
-      // Se já existe um DirectionsRenderer, atualize-o
-      if (directionsRenderer) {
-        directionsRenderer.setDirections(result);
-      } else {
-        // Caso contrário, crie um novo
-        const renderer = new window.google.maps.DirectionsRenderer();
-        renderer.setMap(mapRef.current);
-        renderer.setDirections(result);
-        setDirectionsRenderer(renderer);
-      }
-    } catch (error) {
-      console.error('Erro ao calcular rota:', error);
-      setError('Não foi possível calcular a rota');
-    }
-  }, [currentLocation, directionsRenderer]);
-
-  // Atualizar localização atual
-  useEffect(() => {
-    if (navigator.geolocation) {
-      const watchId = navigator.geolocation.watchPosition(
-        (position) => {
-          const newLocation = {
-            lat: position.coords.latitude,
-            lng: position.coords.longitude
-          };
-          setCurrentLocation(newLocation);
-
-          // Se estiver em uma corrida, recalcular rota
-          if (currentRide?.origin?.coordinates) {
-            calculateRoute(currentRide.origin.coordinates);
-          }
-        },
-        (error) => {
-          console.error('Erro ao obter localização:', error);
-          setError('Não foi possível obter sua localização');
-        },
-        {
-          enableHighAccuracy: true,
-          timeout: 5000,
-          maximumAge: 0
-        }
-      );
-
-      return () => navigator.geolocation.clearWatch(watchId);
-    }
-  }, [currentRide, calculateRoute]);
+    return (
+      <div className="fixed bottom-20 left-0 right-0 mx-4 bg-white rounded-lg shadow-lg p-4 border border-gray-200 z-50">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <svg className="w-6 h-6 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15.536a5 5 0 001.414 1.414m2.828-9.9a9 9 0 012.828-2.828" />
+            </svg>
+            <div>
+              <p className="font-medium">Ativar notificações sonoras?</p>
+              <p className="text-sm text-gray-500">Para receber alertas de novas corridas</p>
+            </div>
+          </div>
+          <div className="flex space-x-2">
+            <button
+              onClick={() => setShowAudioPrompt(false)}
+              className="px-3 py-1 text-sm text-gray-600 hover:text-gray-800"
+            >
+              Depois
+            </button>
+            <button
+              onClick={requestAudioPermission}
+              className="px-4 py-1 bg-blue-500 text-white rounded-md text-sm hover:bg-blue-600"
+            >
+              Ativar
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   if (loading) {
     return (
@@ -657,6 +857,9 @@ export default function DriverDashboard() {
           </button>
         </div>
       </div>
+
+      {/* Erro de Localização */}
+      {renderLocationError()}
 
       {/* Conteúdo Principal */}
       <div className="pt-16 pb-20"> {/* Espaço para a barra de status e bottom bar */}
@@ -789,6 +992,9 @@ export default function DriverDashboard() {
           )}
         </div>
       </div>
+
+      {/* Prompt de permissão de áudio */}
+      <AudioPermissionPrompt />
     </div>
   );
 } 

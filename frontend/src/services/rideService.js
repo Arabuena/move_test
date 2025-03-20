@@ -82,15 +82,20 @@ export const rideService = {
   getAvailableRides: async () => {
     try {
       console.log('Fazendo requisição para /rides/available');
-      const response = await api.get('/rides/available');
+      const response = await api.get('/rides/available', {
+        retry: 3,
+        retryDelay: 2000
+      });
       console.log('Resposta recebida:', response.data);
       return response.data;
     } catch (error) {
-      console.error('Erro detalhado:', {
-        message: error.message,
-        response: error.response?.data,
-        status: error.response?.status
-      });
+      if (!error.message.includes('timeout')) {
+        console.error('Erro detalhado:', {
+          message: error.message,
+          response: error.response?.data,
+          status: error.response?.status
+        });
+      }
       throw error;
     }
   }
